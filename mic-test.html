@@ -299,7 +299,20 @@
         btn.disabled = false;
       };
 
-      rec.start();
+      try {
+        rec.start();
+      } catch (e) {
+        // Permission was fine — the recorder is what failed. Say so precisely,
+        // rather than sending you off to re-add the home-screen icon for nothing.
+        set("roundtrip", "bad", "The microphone was granted, but the recorder refused to start: <b>" +
+            e.name + "</b> — " + e.message + ". Send me this screen; it's a format problem, not a " +
+            "permission problem.");
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        cdEl.innerHTML = "";
+        btn.textContent = "Try again"; btn.disabled = false;
+        return;
+      }
+
       var left = 3;
       cdEl.innerHTML = left + "<small>say her name out loud</small>";
       var iv = setInterval(function () {
@@ -309,6 +322,14 @@
       }, 1000);
 
     }).catch(function (err) {
+      // Anything that blows up AFTER permission was granted is not a permission
+      // problem. Never relabel a granted mic as a denied one.
+      if (state.permission && state.permission.status === "ok") {
+        set("roundtrip", "bad", "Permission was granted, but recording failed afterwards: <b>" +
+            (err && err.name) + "</b> — " + (err && err.message) + ".");
+        btn.textContent = "Try again"; btn.disabled = false;
+        return;
+      }
       var m = err && err.name === "NotAllowedError"
         ? "<b>Denied.</b> Either you tapped Don't Allow, or iOS is remembering an earlier no. " +
           "Fix: delete the home-screen icon, re-add it from Safari, and try again."
