@@ -1,0 +1,10 @@
+# Scratch output from the image fetcher — regenerated, never edited by hand.
+/tmp-fetch/
+
+# OS noise
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Nothing else is ignored on purpose.
+# /images and /audio ARE committed — they are the app's permanent offline assets.
