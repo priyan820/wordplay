@@ -48,6 +48,11 @@ The two `fetch-*` scripts are workshop tools. They run once, on a computer, and 
 output is ordinary `.jpg` and `.mp3` files committed here. The deployed app never calls them
 and has no network dependency for pictures or sound.
 
+## Credits
+
+Photograph attribution for all 75 images is in [CREDITS.md](CREDITS.md) — several are
+CC-BY or CC-BY-SA and require it. The audio is machine-generated at build time.
+
 ## Deploying
 
 Nothing to run. Push to `main` and GitHub Pages publishes it, usually within a minute.
