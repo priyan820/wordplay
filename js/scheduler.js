@@ -18,7 +18,16 @@ var SCHED = (function () {
   "use strict";
 
   var BLOCK = 6;          /* words per language before it rotates */
-  var NEW_PER_DAY = 2;    /* hard cap. Never more. */
+  var NEW_PER_DAY = 2;    /* hard cap from day two onward. Never more. */
+
+  /* The very first session is the one exception, and it has to be.
+   *
+   * "Two new words a day" plus "cycle the known words for ever" means that on
+   * a brand-new phone there are no known words to cycle, so the queue would be
+   * two words long and then wrap - which contradicts the rule that a session
+   * never runs dry. This seeds the first session only, when there is no history
+   * whatsoever. From the second day the cap is a strict two. */
+  var FIRST_DAY_SEED = 12;
   var STALE_DAYS = 4;
   var RETIRE_AFTER = 3;   /* consecutive DAYS with a miss */
   var BATCH = 48;         /* items generated per top-up (8 blocks) */
@@ -90,7 +99,18 @@ var SCHED = (function () {
     var staleBefore = Date.now() - STALE_DAYS * 86400000;
     var yday = yesterday();
     var pools = {};
-    var newBudget = Math.max(0, NEW_PER_DAY - newToday.length);
+
+    /* A cold start has no history at all. Seed it once; after that, two. */
+    var coldStart = !states.some(function (s) { return s.lastHeard; });
+    var cap = coldStart ? FIRST_DAY_SEED : NEW_PER_DAY;
+
+    /* The budget is counted in WORDS and shared across every language, not
+     * handed out per language. Four languages with two each would be eight new
+     * words a day, which is four times what was asked for. A word already
+     * introduced today may still appear in another language for free - it is
+     * the same word, not a new one. */
+    var newIds = (newToday || []).slice();
+    var budget = Math.max(0, cap - newIds.length);
 
     LANGS.forEach(function (L) {
       var lang = L.code;
@@ -117,13 +137,24 @@ var SCHED = (function () {
       stale.sort(byOldest);
       known.sort(byOldest);
 
-      /* Substitutions jump the queue; genuinely new words are rationed. */
+      /* Substitutions jump the queue; genuinely new words are rationed against
+       * the shared daily budget. */
       var subs = fresh.filter(function (f) { return f._sub; });
-      var brand = fresh.filter(function (f) { return !f._sub; }).slice(0, newBudget);
+      var brand = [];
+      fresh.filter(function (f) { return !f._sub; }).forEach(function (f) {
+        if (newIds.indexOf(f.wordId) !== -1) { brand.push(f); return; }  /* already today's */
+        if (budget > 0) { newIds.push(f.wordId); budget--; brand.push(f); }
+      });
 
+      /* The endless filler. Everything she has already met in this language,
+       * least-recently-heard first - including the words that are also in the
+       * priority list, because once those are served they still have to be
+       * available to come round again. Falling back to the brand-new words
+       * covers the first session, when nothing has been met yet. */
+      var introduced = known.concat(missed, stale).sort(byOldest);
       pools[lang] = {
         priority: missed.concat(stale, subs, brand),
-        cycle: known.length ? known : missed.concat(stale)
+        cycle: introduced.length ? introduced : brand.slice()
       };
     });
 
@@ -132,32 +163,49 @@ var SCHED = (function () {
 
   /* --------------------------------------------------------- assembling -- */
 
-  /* Emit whole blocks of one language at a time. Within a block, no repeats. */
+  /* Emit whole blocks of one language at a time. Within a block, no repeats -
+   * unless the language has fewer than six words available at all, in which
+   * case repeating beats emitting a short block and stalling the queue. */
   function emit(pools, startBlock, blocks, cursors) {
+    /* Rotate only through languages that actually have something to play.
+     * Gujarati and Sindhi have nothing until they are recorded, and including
+     * them would emit empty blocks that slide every later block out of
+     * alignment and mix two languages into one screenful. */
+    var live = LANGS.filter(function (L) {
+      var p = pools[L.code];
+      return p && (p.priority.length || p.cycle.length);
+    });
+    if (!live.length) return [];
+
     var items = [];
     for (var b = 0; b < blocks; b++) {
-      var L = LANGS[(startBlock + b) % LANGS.length];
+      var L = live[(startBlock + b) % live.length];
       var pool = pools[L.code];
-      if (!pool) continue;
 
-      var seen = {}, added = 0, guard = 0;
-      while (added < BLOCK && guard < 400) {
+      var seen = {}, added = 0, guard = 0, lap = 0, allowRepeat = false;
+      while (added < BLOCK && guard < 600) {
         guard++;
         var pick = null;
 
         if (pool.priority.length) {
           pick = pool.priority.shift();
         } else if (pool.cycle.length) {
-          /* Cycle the known words for ever. This is what makes the session
-           * endless: the list wraps instead of running out. */
+          /* Cycle for ever. This is what makes the session endless: the list
+           * wraps instead of running out. */
           var c = cursors[L.code] || 0;
           pick = pool.cycle[c % pool.cycle.length];
           cursors[L.code] = c + 1;
         } else {
-          break;   /* this language has no playable words at all yet */
+          break;
         }
+        if (!pick) continue;
 
-        if (!pick || seen[pick.wordId]) continue;
+        if (seen[pick.wordId] && !allowRepeat) {
+          /* A whole lap of the cycle with nothing new means this language has
+           * fewer than six words available. Repeat rather than truncate. */
+          if (++lap > pool.cycle.length) allowRepeat = true;
+          continue;
+        }
         seen[pick.wordId] = true;
         items.push({ wordId: pick.wordId, lang: L.code });
         added++;
