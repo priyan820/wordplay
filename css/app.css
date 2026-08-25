@@ -1,0 +1,259 @@
+/* app.css - all styling for Wordplay.
+ *
+ * Two worlds in one file:
+ *   .kid    one photo, nothing else. No text, ever.
+ *   .parent ordinary controls, ordinary type, for adults.
+ */
+
+:root {
+  --bg: #faf6ef;
+  --ink: #2c2a26;
+  --dim: #6b665c;
+  --line: #e0d9cc;
+  --card: #ffffff;
+  --ok: #3f9c5a;
+  --skip: #9a958c;
+  --danger: #c0503f;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;                 /* the app never scrolls as a whole */
+  overscroll-behavior: none;        /* kills pull-to-refresh */
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;      /* no long-press copy/save menu */
+  touch-action: manipulation;       /* this, not user-scalable, is what stops
+                                       double-tap zoom on modern iOS */
+}
+
+body { position: fixed; inset: 0; width: 100%; }
+
+.screen { position: absolute; inset: 0; display: none; }
+.screen.on { display: block; }
+
+/* ===================================================================== KID == */
+/* Everything she sees. One photo. No text nodes exist in this subtree at all. */
+
+#kid {
+  background: var(--bg);
+  transition: background-color 620ms ease;
+}
+
+#stage {
+  position: absolute;
+  top: var(--safe-top);
+  left: 0;
+  right: 0;
+  /* Stops short of the scoring bar. Her taps and our taps cannot overlap. */
+  bottom: calc(96px + var(--safe-bottom) + 44px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#card {
+  width: min(86vw, 86vh, 620px);
+  height: min(86vw, 86vh, 620px);
+  border-radius: 34px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0,0,0,.13), 0 2px 6px rgba(0,0,0,.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  transition: transform 140ms ease;
+}
+#card.press { transform: scale(.975); }
+
+#photo {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+#emoji {
+  font-size: min(46vw, 46vh, 320px);
+  line-height: 1;
+  pointer-events: none;
+}
+.hide { display: none !important; }
+
+/* The scoring bar. Deliberately far from where a toddler taps, and visually
+ * quiet so it never reads as part of her screen. */
+#score {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 0;
+  height: calc(96px + var(--safe-bottom));
+  padding: 0 18px var(--safe-bottom);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: linear-gradient(to top, rgba(0,0,0,.055), rgba(0,0,0,0));
+}
+#score button {
+  flex: 1;
+  height: 62px;
+  border: 0;
+  border-radius: 18px;
+  font: 600 15px/1 inherit;
+  color: #fff;
+  opacity: .55;                     /* muted: this is furniture, not a game */
+  -webkit-appearance: none;
+}
+#btnGot  { background: var(--ok); }
+#btnMiss { background: var(--skip); }
+
+/* Celebration. Fires on every tap of the photo, win or lose - there is no
+ * variant of this animation and nothing reads the score. */
+.spark {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: fly 720ms cubic-bezier(.2,.7,.3,1) forwards;
+}
+@keyframes fly {
+  0%   { transform: translate(0,0) scale(.4); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(1.15); opacity: 0; }
+}
+
+/* The hidden way in. Invisible, top-left, 3-second press. */
+#doorway {
+  position: absolute;
+  top: 0; left: 0;
+  width: 84px; height: 84px;
+  z-index: 40;
+}
+
+/* ================================================================== PARENT == */
+
+#parent, #dinner {
+  background: var(--bg);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: calc(var(--safe-top) + 14px) 16px calc(var(--safe-bottom) + 28px);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.pbar {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 18px;
+}
+.pbar h1 { font-size: 21px; margin: 0; flex: 1; letter-spacing: -.01em; }
+
+.btn {
+  display: block; width: 100%;
+  border: 0; border-radius: 14px;
+  background: var(--ink); color: var(--bg);
+  font: 600 16px/1 inherit;
+  padding: 17px 16px;
+  margin: 0 0 10px;
+  -webkit-appearance: none;
+  text-align: center;
+}
+.btn.light { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.btn.warn  { background: var(--danger); color: #fff; }
+.btn.small { padding: 12px 14px; font-size: 15px; width: auto; display: inline-block; margin-right: 8px; }
+.btn:disabled { opacity: .4; }
+
+.panel { display: none; }
+.panel.on { display: block; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin: 0 0 12px;
+}
+.card h2 { font-size: 15px; margin: 0 0 8px; }
+.card p  { font-size: 14px; color: var(--dim); margin: 0 0 6px; }
+
+.muted { color: var(--dim); font-size: 13.5px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row > * { flex: 1; }
+
+select, input[type=text] {
+  width: 100%; padding: 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--card);
+  font: 15px inherit; color: var(--ink);
+  -webkit-appearance: none;
+}
+
+/* -- recording booth -- */
+#recWord {
+  text-align: center;
+  padding: 22px 12px 18px;
+}
+#recRoman { font-size: 46px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 2px; }
+#recNative { font-size: 22px; color: var(--dim); margin: 0 0 4px; }
+#recMeta { font-size: 13px; color: var(--dim); }
+#recEmoji { font-size: 54px; margin: 0 0 6px; }
+
+#recBtn {
+  width: 128px; height: 128px; border-radius: 50%;
+  border: 0; background: var(--danger); color: #fff;
+  font: 600 15px/1.2 inherit;
+  margin: 6px auto 14px; display: block;
+}
+#recBtn.recording { background: #7d1f14; animation: pulse 1.1s infinite; }
+@keyframes pulse { 50% { transform: scale(1.06); } }
+
+.covbar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 6px 0 2px; }
+.covbar i { display: block; height: 100%; background: var(--ok); }
+
+/* -- word editor list -- */
+.wlist { max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.wrow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 4px; border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+.wrow .e { font-size: 24px; width: 32px; text-align: center; }
+.wrow .n { flex: 1; }
+.wrow .t { font-size: 12px; color: var(--dim); }
+
+/* -- log -- */
+.tag {
+  display: inline-block; padding: 4px 9px; border-radius: 99px;
+  font-size: 13px; margin: 0 6px 6px 0; background: var(--line);
+}
+.tag.got  { background: #d9efdf; }
+.tag.miss { background: #f2ded9; }
+
+/* ================================================================== DINNER == */
+/* The most important screen in the app. Big type, four words, nothing else. */
+
+#dinner { display: none; }
+#dinner.on { display: block; }
+#dinnerList { margin: 8px 0 20px; }
+.dcard {
+  border-radius: 20px;
+  padding: 18px 20px 20px;
+  margin: 0 0 12px;
+}
+.dcard .l { font-size: 13px; letter-spacing: .09em; text-transform: uppercase; opacity: .72; margin: 0 0 6px; }
+.dcard .r { font-size: 42px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 2px; }
+.dcard .n { font-size: 20px; opacity: .66; }
+.dcard .m { font-size: 12px; opacity: .72; margin-top: 6px; }
+
+@media (max-height: 700px) {
+  .dcard .r { font-size: 34px; }
+  .dcard { padding: 14px 16px 16px; }
+}
