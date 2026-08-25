@@ -36,6 +36,10 @@ param(
   # "slipper" a slipper mushroom. Wikimedia Commons is much stronger for single
   # objects and has no rate limit, so this switch flips the order.
   [switch]   $CommonsFirst,
+  # Try Wikipedia's article lead image first. For a concrete noun that is
+  # almost always a clean, well-lit single subject, which is exactly what plain
+  # keyword search kept failing to produce.
+  [switch]   $WikipediaFirst,
   # How confident a match must be before it is accepted. The bare-title bonus
   # is 25, so this threshold effectively demands a title that is essentially
   # just the word. Below it, the word keeps its emoji rather than take a photo
@@ -53,7 +57,7 @@ $ManifestPath = Join-Path $ImagesDir "manifest.json"
 $RejectedPath = Join-Path $ImagesDir "rejected.json"
 $NeedsPath    = Join-Path $Root "needs-image.txt"
 
-$UA = "wordplay-image-fetch/1.0 (private family language app; contact via repo owner)"
+$UA = "wordplay-image-fetch/1.0 (+https://github.com/priyan820/wordplay)"
 
 # Titles that mean "not a single clear object a toddler can name".
 $BadTitle = 'collage|\bset\b|collection|\bicon\b|vector|logo|diagram|clipart|pattern|wallpaper|texture'
@@ -62,6 +66,46 @@ $BadTitle = 'collage|\bset\b|collection|\bicon\b|vector|logo|diagram|clipart|pat
 # with a jute shopping bag filed under "elephant" and a bleach bottle under
 # "bottle". These are the ones that actually got through in practice.
 $MerchTitle = 'detergent|bleach|shampoo|cleaner|packaging|\blabel\b|advert|for sale|\bshop\b|\bstore\b|t-shirt|tshirt|mug\b|poster|sticker|costume|tattoo|greeting card'
+
+# Specific Commons files chosen by eye, after the automated sources kept
+# returning the wrong subject: "star" got the Sun, "stone" the Grand Canyon,
+# "milk" a cat, "table" a baroque console, "mirror" a car wing mirror. These are
+# recorded here rather than downloaded by hand so the whole image set is
+# reproducible from this script alone.
+$HandPick = @{
+  blocks = "File:A pile of alphabet wooden blocks.jpg"
+  hair   = "File:Girl with long hair, rear view.jpg"
+  star   = "File:Orange star decoration (Unsplash).jpg"
+  stone  = "File:Smooth pebbles on the beach.jpg"
+  table  = "File:Dining table brown.jpg"
+  car    = "File:2025 Honda City Hatchback 1.5 RS Facelift taken in Paris Van Java 01.jpg"
+  mirror = "File:Bright bathroom with mirror and sink.jpg"
+}
+
+# Which Wikipedia article's lead image to use. Anything not listed falls back to
+# the capitalised word. These overrides exist because the obvious article has the
+# wrong lead image: "Star" leads with the Sun, "Hair" with an anatomy diagram,
+# "Rock (geology)" with a canyon landscape.
+$Article = @{
+  bag="Bag"; ball="Ball"; balloon="Toy balloon"; bed="Bed"; bird="Bird"
+  blanket="Blanket"; blocks="Toy block"; book="Book"; bottle="Bottle"
+  bread="Bread"; bucket="Bucket"; bus="Bus"; butterfly="Butterfly"
+  car="Sedan (automobile)"; carrot="Carrot"; chair="Chair"; clock="Clock"
+  comb="Comb"; cookie="Cookie"; cow="Cattle"; crayon="Crayon"; cup="Cup"
+  doll="Doll"; door="Door"; duck="Duck"; ear="Ear"; elephant="Elephant"
+  eye="Human eye"; fan="Fan (machine)"; fish="Fish"; flower="Flower"
+  foot="Foot"; grapes="Grape"; hair="Hairstyle"; hand="Hand"; hat="Hat"
+  key="Key (lock)"; leaf="Leaf"; light="Electric light"; mango="Mango"
+  milk="Milk"; mirror="Mirror"; moon="Moon"; nose="Human nose"
+  phone="Smartphone"; pillow="Pillow"; plate="Plate (dishware)"
+  rain="Rain"; rice="Rice"; road="Road"; roti="Roti"; shirt="Shirt"
+  shoes="Shoe"; slipper="Slipper"; soap="Soap"; socks="Sock"; spoon="Spoon"
+  star="Star"; stone="Rock (geology)"; sun="Sun"; table="Table (furniture)"
+  teddy="Teddy bear"; teeth="Tooth"; toothbrush="Toothbrush"; towel="Towel"
+  tree="Tree"; umbrella="Umbrella"; water="Water"; window="Window"
+  apple="Apple"; banana="Banana"; ant="Ant"; cat="Cat"; dog="Dog"
+  chocolate="Chocolate"; bottle2="Bottle"
+}
 
 # Some bare English nouns are ambiguous and search badly. "plate" returns
 # license plates, "star" returns galaxies, "sun" returns sunglasses, "slipper"
@@ -204,6 +248,74 @@ function Invoke-Commons($query) {
   }
 }
 
+function Invoke-CommonsFile($title) {
+  Start-Sleep -Milliseconds $DelayMs
+  $url = "https://commons.wikimedia.org/w/api.php?action=query&titles=" +
+         [uri]::EscapeDataString($title) +
+         "&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=1600&format=json"
+  try {
+    $r = Invoke-RestMethod -Uri $url -Headers @{ "User-Agent" = $UA } -TimeoutSec 30
+    $page = ($r.query.pages.PSObject.Properties | Select-Object -First 1).Value
+    if (-not $page.imageinfo) { return @() }
+    $ii = $page.imageinfo[0]
+    return @([pscustomobject]@{
+      title    = ($title -replace '^File:', '' -replace '\.[a-z]+$', '')
+      direct   = $(if ($ii.thumburl) { $ii.thumburl } else { $ii.url })
+      page     = $ii.descriptionurl
+      creator  = "Wikimedia Commons contributors"
+      license  = $(if ($ii.extmetadata.LicenseShortName) { $ii.extmetadata.LicenseShortName.value } else { "see page" })
+      provider = "wikimedia"
+    })
+  } catch {
+    Write-Host "  commons file error: $($_.Exception.Message)" -ForegroundColor DarkGray
+    return @()
+  }
+}
+
+function Invoke-Wikipedia($word) {
+  Start-Sleep -Milliseconds 1200
+  $title = $(if ($Article.ContainsKey($word)) { $Article[$word] }
+             else { $word.Substring(0,1).ToUpper() + $word.Substring(1) })
+  $url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + [uri]::EscapeDataString($title)
+  try {
+    $r = Invoke-RestMethod -Uri $url -Headers @{ "User-Agent" = $UA } -TimeoutSec 30
+    $direct = $null
+    if ($r.originalimage -and $r.originalimage.source) { $direct = $r.originalimage.source }
+    elseif ($r.thumbnail -and $r.thumbnail.source)     { $direct = $r.thumbnail.source }
+    if (-not $direct) { return @() }
+    return @([pscustomobject]@{
+      title    = $r.title
+      direct   = $direct
+      page     = $(if ($r.content_urls) { $r.content_urls.desktop.page } else { "https://en.wikipedia.org/wiki/$title" })
+      creator  = "Wikipedia / Wikimedia Commons contributors"
+      license  = "see Commons file page"
+      provider = "wikipedia"
+    })
+  } catch {
+    $code = $(if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 })
+    if ($code -eq 429) {
+      Write-Host "  wikipedia rate limit - waiting 20s and retrying once" -ForegroundColor DarkGray
+      Start-Sleep -Seconds 20
+      try {
+        $r = Invoke-RestMethod -Uri $url -Headers @{ "User-Agent" = $UA } -TimeoutSec 30
+        $direct = $null
+        if ($r.originalimage -and $r.originalimage.source) { $direct = $r.originalimage.source }
+        elseif ($r.thumbnail -and $r.thumbnail.source)     { $direct = $r.thumbnail.source }
+        if ($direct) {
+          return @([pscustomobject]@{
+            title = $r.title; direct = $direct
+            page = $(if ($r.content_urls) { $r.content_urls.desktop.page } else { "https://en.wikipedia.org/wiki/$title" })
+            creator = "Wikipedia / Wikimedia Commons contributors"
+            license = "see Commons file page"; provider = "wikipedia"
+          })
+        }
+      } catch { }
+    }
+    Write-Host "  wikipedia error: $($_.Exception.Message)" -ForegroundColor DarkGray
+    return @()
+  }
+}
+
 # ------------------------------------------------------------- candidates ----
 # Scoring, rather than a plain first-usable-wins. Openverse sorts by relevance,
 # which is not the same as "one clear object a three-year-old can name" - the
@@ -243,6 +355,10 @@ function Get-Score($c, $word) {
   return $score
 }
 
+# NOTE: PowerShell unrolls a single-element array on `return`, so callers must
+# wrap this in @() or a one-candidate result arrives as a bare object whose
+# .Count is $null. That silently disabled the Wikipedia source entirely, since
+# it returns exactly one candidate every time.
 function Get-Ranked($results, $word, $provider) {
   $scored = @()
   foreach ($r in $results) {
@@ -252,7 +368,19 @@ function Get-Ranked($results, $word, $provider) {
         creator = $r.creator; license = $r.license; provider = "openverse/$($r.source)"
       }
     } else { $r }
-    $s = Get-Score $c $word
+    if ($provider -eq "handpick") {
+      $s = 40
+      if (-not $c.direct) { $s = -100 }
+    } elseif ($provider -eq "wikipedia") {
+      # The article was chosen deliberately, so its lead image does not have to
+      # argue for itself through its filename. Only the hard rejects apply.
+      $s = 30
+      if (-not $c.direct) { $s = -100 }
+      elseif ($c.direct -match '\.svgz?($|\?)') { $s = -100 }
+      elseif ($rejects.ContainsKey($word) -and (@($rejects[$word]) -contains $c.direct)) { $s = -100 }
+    } else {
+      $s = Get-Score $c $word
+    }
     if ($s -gt -100) { $scored += [pscustomobject]@{ score = $s; cand = $c } }
   }
   return @($scored | Sort-Object -Property score -Descending)
@@ -348,8 +476,21 @@ foreach ($word in $words) {
   $term = $(if ($SearchHint.ContainsKey($word)) { $SearchHint[$word] } else { $word })
   if ($term -ne $word) { Write-Host "    searching for: $term" -ForegroundColor DarkGray }
 
-  if ($CommonsFirst) {
-    $ranked = Get-Ranked (Invoke-Commons $term) $word "commons"
+  if ($HandPick.ContainsKey($word)) {
+    $ranked = @(Get-Ranked (Invoke-CommonsFile $HandPick[$word]) $word "handpick")
+    $pool  += $ranked
+    if ($ranked.Count) { $saved = Try-Save $ranked $word $file $MinScore "handpick" }
+  }
+
+  if (-not $saved -and $WikipediaFirst) {
+    $wraw = @(Invoke-Wikipedia $word)
+    $ranked = @(Get-Ranked $wraw $word "wikipedia")
+    $pool  += $ranked
+    if ($ranked.Count) { $saved = Try-Save $ranked $word $file $MinScore "wikipedia:$word" }
+  }
+
+  if (-not $saved -and $CommonsFirst) {
+    $ranked = @(Get-Ranked (Invoke-Commons $term) $word "commons")
     $pool  += $ranked
     if ($ranked.Count) { $saved = Try-Save $ranked $word $file $MinScore $term }
   }
@@ -359,7 +500,7 @@ foreach ($word in $words) {
   foreach ($modifier in @("isolated", "single", "")) {
     if ($saved) { break }
     $q = $(if ($modifier) { "$term $modifier" } else { $term })
-    $ranked = Get-Ranked (Invoke-Openverse $q) $word "openverse"
+    $ranked = @(Get-Ranked (Invoke-Openverse $q) $word "openverse")
     $pool  += $ranked
     if ($ranked.Count) { $saved = Try-Save $ranked $word $file $MinScore $q }
   }
@@ -367,7 +508,7 @@ foreach ($word in $words) {
   # Wikimedia Commons fallback (when it was not already tried first).
   if (-not $saved -and -not $CommonsFirst) {
     Write-Host "    openverse found nothing usable, trying Commons" -ForegroundColor DarkYellow
-    $ranked = Get-Ranked (Invoke-Commons $term) $word "commons"
+    $ranked = @(Get-Ranked (Invoke-Commons $term) $word "commons")
     $pool  += $ranked
     if ($ranked.Count) { $saved = Try-Save $ranked $word $file $MinScore $term }
   }

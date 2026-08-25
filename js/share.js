@@ -5,6 +5,9 @@
  * file makes a network request - search it for "fetch" and you will find none.
  *
  * Export -> share sheet -> WhatsApp or AirDrop -> other phone imports -> merge.
+ *
+ * Only progress moves this way. Photos and audio are static files in the repo
+ * and arrive with the app itself, so there is nothing large to send.
  */
 
 var SHARE = (function () {
@@ -152,92 +155,9 @@ var SHARE = (function () {
     return file.text().then(function (t) { return mergeData(JSON.parse(t)); });
   }
 
-  /* -------------------------------------------- recordings: zip in / out -- */
-
-  function extFor(mime) {
-    if (!mime) return "bin";
-    if (mime.indexOf("mp4") !== -1 || mime.indexOf("aac") !== -1) return "m4a";
-    if (mime.indexOf("webm") !== -1) return "webm";
-    if (mime.indexOf("ogg") !== -1) return "ogg";
-    if (mime.indexOf("wav") !== -1) return "wav";
-    if (mime.indexOf("mpeg") !== -1) return "mp3";
-    return "bin";
-  }
-
-  function fileNameFor(rec) {
-    return rec.wordId + "__" + rec.lang + "__" + rec.voice + "." + extFor(rec.mime);
-  }
-
-  function exportRecordings() {
-    return DB.all("recordings").then(function (rows) {
-      rows = rows || [];
-      if (!rows.length) return Promise.reject(new Error("There are no recordings on this phone yet."));
-
-      var manifest = {};
-      return Promise.all(rows.map(function (r) {
-        return r.blob.arrayBuffer().then(function (buf) {
-          var name = fileNameFor(r);
-          manifest[r.key] = name;
-          return { name: "audio/" + name, bytes: new Uint8Array(buf) };
-        });
-      })).then(function (files) {
-        var enc = new TextEncoder();
-        files.push({
-          name: "audio/manifest.json",
-          bytes: enc.encode(JSON.stringify(manifest, null, 2))
-        });
-        var blob = ZIP.write(files);
-        var name = "wordplay-voices-" + stamp() + ".zip";
-        return shareFile(blob, name, "Wordplay recordings", null).then(function (how) {
-          return { how: how, count: rows.length, bytes: blob.size, name: name };
-        });
-      });
-    });
-  }
-
-  function importRecordings(file) {
-    return file.arrayBuffer().then(function (buf) {
-      var entries = ZIP.read(buf);
-      var manifestEntry = entries.filter(function (e) { return /manifest\.json$/.test(e.name); })[0];
-      var map = {};
-      if (manifestEntry) {
-        var byName = {};
-        var parsed = JSON.parse(new TextDecoder().decode(manifestEntry.bytes));
-        Object.keys(parsed).forEach(function (k) { byName[parsed[k]] = k; });
-        map = byName;
-      }
-
-      var rows = [];
-      entries.forEach(function (e) {
-        if (/manifest\.json$/.test(e.name)) return;
-        var base = e.name.split("/").pop();
-        var key = map[base];
-        if (!key) {
-          /* Fall back to the filename shape: word__lang__voice.ext */
-          var m = base.match(/^(.+?)__(.+?)__(.+?)\.[a-z0-9]+$/);
-          if (!m) return;
-          key = m[1] + "|" + m[2] + "|" + m[3];
-        }
-        var parts = key.split("|");
-        var mime = /\.m4a$/.test(base) ? "audio/mp4"
-                 : /\.webm$/.test(base) ? "audio/webm"
-                 : /\.ogg$/.test(base) ? "audio/ogg" : "application/octet-stream";
-        rows.push({
-          key: key, wordId: parts[0], lang: parts[1], voice: parts[2],
-          blob: new Blob([e.bytes], { type: mime }),
-          mime: mime, bytes: e.bytes.length, ts: Date.now()
-        });
-      });
-
-      return DB.putMany("recordings", rows)
-        .then(AUDIO.refreshLocalKeys)
-        .then(function () { return { count: rows.length }; });
-    });
-  }
-
   /* --------------------------------------------------------- dinner card -- */
 
-  /* Four words to use out loud tonight, one per language, drawn from what she
+  /* Three words to use out loud tonight, one per language, drawn from what she
    * actually practised today. Missed words first - those are the ones worth
    * saying at the table. */
   function dinnerCard() {
@@ -307,7 +227,7 @@ var SHARE = (function () {
   function renderDinnerPng(picks) {
     return new Promise(function (resolve) {
       try {
-        var W = 1080, H = 1350;
+        var W = 1080, H = 1200;
         var c = document.createElement("canvas");
         c.width = W; c.height = H;
         var x = c.getContext("2d");
@@ -318,7 +238,7 @@ var SHARE = (function () {
         x.textAlign = "center";
         x.fillText("Tonight's four words", W / 2, 120);
 
-        var top = 210, rowH = 270;
+        var top = 220, rowH = 300;
         picks.forEach(function (p, i) {
           var y = top + i * rowH;
           x.fillStyle = p.lang.bg;
@@ -356,8 +276,7 @@ var SHARE = (function () {
 
   return {
     exportDay: exportDay, importJsonFile: importJsonFile, mergeData: mergeData,
-    exportRecordings: exportRecordings, importRecordings: importRecordings,
     dinnerCard: dinnerCard, shareDinnerCard: shareDinnerCard,
-    deviceId: deviceId, fileNameFor: fileNameFor, extFor: extFor
+    deviceId: deviceId
   };
 }());

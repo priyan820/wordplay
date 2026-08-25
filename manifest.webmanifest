@@ -1,8 +1,8 @@
 {
   "name": "Wordplay",
   "short_name": "Wordplay",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#faf6ef",

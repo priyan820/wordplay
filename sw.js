@@ -6,11 +6,11 @@
  *
  * The photo and audio lists are NOT hard-coded here. They are read from
  * images/manifest.json and audio/manifest.json at install time, so adding
- * pictures or recordings never means hand-editing this file - which is the
+ * pictures or audio never means hand-editing this file - which is the
  * kind of chore that eventually gets forgotten and breaks offline mode.
  */
 
-var VERSION = "wordplay-v1";
+var VERSION = "wordplay-v2";
 
 var CORE = [
   "./",
@@ -19,7 +19,6 @@ var CORE = [
   "css/app.css",
   "js/words.js",
   "js/db.js",
-  "js/zip.js",
   "js/audio.js",
   "js/scheduler.js",
   "js/share.js",

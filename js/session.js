@@ -18,7 +18,6 @@ var SESSION = (function () {
   var item = null;       /* {wordId, lang} currently on screen */
   var word = null;
   var lastLang = null;
-  var parity = 0;        /* flips per session: picks mum or dad */
   var deviceId = "unknown";
   var busy = false;
   var imageManifest = {};
@@ -44,7 +43,6 @@ var SESSION = (function () {
     return Promise.all([imgs, SHARE.deviceId(), DB.metaGet("sessionCount", 0)])
       .then(function (r) {
         deviceId = r[1];
-        parity = (r[2] || 0) % 2;
         return DB.metaSet("sessionCount", (r[2] || 0) + 1);
       })
       .then(function () { return SCHED.build(); })
@@ -81,7 +79,7 @@ var SESSION = (function () {
     lastTap = now;
     AUDIO.unlock();
     celebrate();
-    if (item) AUDIO.playWord(item.wordId, item.lang, parity);
+    if (item) AUDIO.playWord(item.wordId, item.lang);
   }
 
   /* ---------------------------------------------------------- the screen -- */
@@ -117,8 +115,9 @@ var SESSION = (function () {
     });
   }
 
-  /* Walk forward past anything with no voice. A Gujarati word with no
-   * recording is skipped in silence rather than mispronounced. */
+  /* Walk forward past anything with no voice. With a full set of clips nothing
+   * is skipped, but the guard stays so a missing file degrades quietly instead
+   * of showing a picture that says nothing. */
   function advanceToPlayable() {
     return SCHED.maybeExtend(q).then(function (queue) {
       q = queue;
@@ -176,8 +175,8 @@ var SESSION = (function () {
     busy = true;
     AUDIO.stop();
 
-    var voice = AUDIO.pickVoice(item.wordId, item.lang, parity) ||
-                (AUDIO.canSpeak(item.lang) ? "tts" : "none");
+    var voice = AUDIO.hasClip(item.wordId, item.lang) ? "clip"
+              : (AUDIO.canSpeak(item.lang) ? "tts" : "none");
 
     SCHED.record(item.wordId, item.lang, result, voice, deviceId)
       .then(next)

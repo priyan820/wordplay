@@ -1,14 +1,18 @@
-/* audio.js - deciding what she hears, and playing it.
+/* audio.js - what she hears.
  *
- * Resolution order for any word+language:
- *   1. a recording in IndexedDB       (freshest, made on this phone)
- *   2. a recording committed to /audio (permanent, arrives on both phones)
- *   3. the phone's own voice           -- ENGLISH AND HINDI ONLY
- *   4. nothing                         -- the word is skipped, never guessed at
+ * Every word ships a real audio file for every language, generated once at
+ * build time and committed to the repo. So this file has one job: look the
+ * clip up and play it.
  *
- * Step 4 is the important one. iOS has no trustworthy Gujarati or Sindhi voice.
- * A wrong pronunciation teaches her the wrong word, which is worse than
- * teaching her nothing, so the app stays silent and moves on.
+ * That is a deliberate simplification. An earlier version tried to pick between
+ * a parent recording, a committed file and the phone's own voice, which meant
+ * the app sounded different on each phone depending on which voices iOS
+ * happened to ship. Now both phones sound identical and it works offline from
+ * the first launch.
+ *
+ * speechSynthesis survives only as a last resort, for English and Hindi, if a
+ * file ever fails to load. Gujarati has no iOS voice, so a missing Gujarati
+ * file means silence rather than a guess.
  */
 
 var AUDIO = (function () {
@@ -16,31 +20,20 @@ var AUDIO = (function () {
 
   var ctx = null;
   var unlocked = false;
-  var staticManifest = {};   /* "water|gu|mum" -> "water__gu__mum.m4a" */
-  var localKeys = {};        /* "water|gu|mum" -> true, from IndexedDB  */
-  var current = null;        /* the <audio> element in flight           */
+  var manifest = {};      /* "water|hi" -> "water__hi.mp3" */
+  var current = null;
 
   /* ------------------------------------------------------------- startup -- */
 
   function init() {
-    var a = fetch("audio/manifest.json", { cache: "no-cache" })
+    return fetch("audio/manifest.json", { cache: "no-cache" })
       .then(function (r) { return r.ok ? r.json() : {}; })
-      .then(function (j) { staticManifest = j || {}; })
-      .catch(function () { staticManifest = {}; });
-    return Promise.all([a, refreshLocalKeys()]);
+      .then(function (j) { manifest = j || {}; })
+      .catch(function () { manifest = {}; });
   }
 
-  function refreshLocalKeys() {
-    return DB.all("recordings").then(function (rows) {
-      localKeys = {};
-      (rows || []).forEach(function (r) { localKeys[r.key] = true; });
-      return localKeys;
-    }).catch(function () { localKeys = {}; return localKeys; });
-  }
-
-  /* iOS will not play anything until a real finger touches the screen. Every
-   * playback in this app follows her tap, so one unlock at the first tap
-   * covers the whole session. */
+  /* iOS plays nothing until a real finger has touched the screen. Every sound
+   * in this app follows her tap, so one unlock covers the whole session. */
   function unlock() {
     if (unlocked) return;
     try {
@@ -50,37 +43,19 @@ var AUDIO = (function () {
       var s = ctx.createBufferSource();
       s.buffer = b; s.connect(ctx.destination); s.start(0);
       unlocked = true;
-    } catch (e) { /* not fatal - recordings still play through <audio> */ }
+    } catch (e) { /* not fatal - files still play through <audio> */ }
   }
 
   /* --------------------------------------------------------- what exists -- */
 
-  function voicesFor(lang) { return VOICE_FOR_LANG[lang] || []; }
-
-  /* Which voice to use when both parents recorded the same word. Flips from one
-   * session to the next, so a sitting is consistent but the days vary. */
-  function pickVoice(wordId, lang, parity) {
-    var have = voicesFor(lang).filter(function (v) {
-      var k = wordId + "|" + lang + "|" + v;
-      return localKeys[k] || staticManifest[k];
-    });
-    if (!have.length) return null;
-    if (have.length === 1) return have[0];
-    return have[(parity || 0) % have.length];
-  }
-
-  function hasRecording(wordId, lang) {
-    return voicesFor(lang).some(function (v) {
-      var k = wordId + "|" + lang + "|" + v;
-      return localKeys[k] || staticManifest[k];
-    });
-  }
-
+  function keyFor(wordId, lang) { return wordId + "|" + lang; }
+  function hasClip(wordId, lang) { return !!manifest[keyFor(wordId, lang)]; }
   function canSpeak(lang) { return TTS_LANGS.indexOf(lang) !== -1; }
 
-  /* The scheduler asks this before putting a word in the queue. */
+  /* The scheduler asks this before queueing a word. With a full set of clips
+   * this is true for everything, but it stays honest if one is ever missing. */
   function isPlayable(wordId, lang) {
-    return hasRecording(wordId, lang) || canSpeak(lang);
+    return hasClip(wordId, lang) || canSpeak(lang);
   }
 
   function coverage() {
@@ -88,10 +63,20 @@ var AUDIO = (function () {
     WORDS.forEach(function (w) {
       LANGS.forEach(function (l) {
         total++;
-        if (hasRecording(w.id, l.code)) done++;
+        if (hasClip(w.id, l.code)) done++;
       });
     });
     return { done: done, total: total };
+  }
+
+  function missing() {
+    var out = [];
+    WORDS.forEach(function (w) {
+      LANGS.forEach(function (l) {
+        if (!hasClip(w.id, l.code)) out.push(w.labels[l.code].roman + " (" + l.code + ")");
+      });
+    });
+    return out;
   }
 
   /* ------------------------------------------------------------ playing -- */
@@ -99,24 +84,9 @@ var AUDIO = (function () {
   function stop() {
     if (current) {
       try { current.pause(); } catch (e) {}
-      if (current._url) URL.revokeObjectURL(current._url);
       current = null;
     }
     try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
-  }
-
-  function playBlob(blob) {
-    return new Promise(function (resolve) {
-      stop();
-      var url = URL.createObjectURL(blob);
-      var el = new Audio();
-      el._url = url;
-      el.src = url;
-      current = el;
-      el.onended = function () { URL.revokeObjectURL(url); resolve(true); };
-      el.onerror = function () { URL.revokeObjectURL(url); resolve(false); };
-      el.play().catch(function () { resolve(false); });
-    });
   }
 
   function playUrl(url) {
@@ -124,6 +94,7 @@ var AUDIO = (function () {
       stop();
       var el = new Audio();
       el.src = url;
+      el.preload = "auto";
       current = el;
       el.onended = function () { resolve(true); };
       el.onerror = function () { resolve(false); };
@@ -153,8 +124,8 @@ var AUDIO = (function () {
     });
   }
 
-  /* Returns { played: bool, voice: "mum"|"dad"|"tts"|"none" } */
-  function playWord(wordId, lang, parity) {
+  /* Returns { played: bool, voice: "clip"|"tts"|"none" } */
+  function playWord(wordId, lang) {
     var word = WORDS.filter(function (w) { return w.id === wordId; })[0];
     if (!word) return Promise.resolve({ played: false, voice: "none" });
 
@@ -164,30 +135,14 @@ var AUDIO = (function () {
           return { played: ok, voice: ok ? "tts" : "none" };
         });
       }
-      /* Gujarati or Sindhi with no recording. Silence is the correct answer. */
       return Promise.resolve({ played: false, voice: "none" });
     }
 
-    var voice = pickVoice(wordId, lang, parity || 0);
-    if (voice) {
-      var key = wordId + "|" + lang + "|" + voice;
-      if (localKeys[key]) {
-        return DB.get("recordings", key).then(function (rec) {
-          if (rec && rec.blob) {
-            return playBlob(rec.blob).then(function (ok) {
-              return ok ? { played: true, voice: voice } : fallback();
-            });
-          }
-          return fallback();
-        });
-      }
-      if (staticManifest[key]) {
-        return playUrl("audio/" + staticManifest[key]).then(function (ok) {
-          return ok ? { played: true, voice: voice } : fallback();
-        });
-      }
-    }
-    return fallback();
+    var file = manifest[keyFor(wordId, lang)];
+    if (!file) return fallback();
+    return playUrl("audio/" + file).then(function (ok) {
+      return ok ? { played: true, voice: "clip" } : fallback();
+    });
   }
 
   /* ------------------------------------------------------------- chimes -- */
@@ -217,8 +172,7 @@ var AUDIO = (function () {
   return {
     init: init, unlock: unlock, stop: stop,
     playWord: playWord, chime: chime, speak: speak,
-    hasRecording: hasRecording, isPlayable: isPlayable, canSpeak: canSpeak,
-    coverage: coverage, refreshLocalKeys: refreshLocalKeys,
-    voicesFor: voicesFor, pickVoice: pickVoice
+    hasClip: hasClip, isPlayable: isPlayable, canSpeak: canSpeak,
+    coverage: coverage, missing: missing
   };
 }());

@@ -48,46 +48,15 @@
   <!-- ---------- menu ---------- -->
   <div class="panel on" id="panelMenu">
     <button class="btn" id="goEnd" type="button">End session &rarr; dinner card</button>
-    <button class="btn light" id="goRecord" type="button">Recording booth</button>
     <button class="btn light" id="goLog" type="button">Today's log</button>
     <button class="btn light" id="goWords" type="button">Word editor</button>
     <button class="btn light" id="goShare" type="button">End day: export &amp; sync</button>
     <button class="btn light" id="goSettings" type="button">Settings</button>
     <div class="card" style="margin-top:14px">
-      <h2>Voice coverage</h2>
+      <h2>Audio</h2>
       <div class="covbar"><i id="covFill" style="width:0%"></i></div>
       <p class="muted" id="covText">counting&hellip;</p>
     </div>
-  </div>
-
-  <!-- ---------- recording booth ---------- -->
-  <div class="panel" id="panelRecord">
-    <div class="row" style="margin-bottom:10px">
-      <select id="recLang"></select>
-      <select id="recFilter">
-        <option value="missing">Missing only</option>
-        <option value="all">All words</option>
-        <option value="done">Recorded only</option>
-      </select>
-    </div>
-
-    <div class="card" id="recWord">
-      <div id="recEmoji"></div>
-      <div id="recRoman">&mdash;</div>
-      <div id="recNative"></div>
-      <div id="recMeta"></div>
-    </div>
-
-    <button id="recBtn" type="button">Hold to<br>record</button>
-
-    <div class="row">
-      <button class="btn light" id="recPlay" type="button" disabled>Play</button>
-      <button class="btn light" id="recSkip" type="button">Skip</button>
-      <button class="btn light" id="recNext" type="button">Next &rarr;</button>
-    </div>
-    <div class="covbar"><i id="recCovFill" style="width:0%"></i></div>
-    <p class="muted" id="recCov"></p>
-    <button class="btn light" id="recDelete" type="button">Delete this recording</button>
   </div>
 
   <!-- ---------- today's log ---------- -->
@@ -101,8 +70,7 @@
       <div id="logMiss" class="muted">nothing yet today</div>
     </div>
     <div class="card">
-      <h2>Needs recording</h2>
-      <p class="muted">Gujarati and Sindhi words with no voice are skipped, never guessed at.</p>
+      <h2>Audio check</h2>
       <div id="logNeeds" class="muted"></div>
     </div>
   </div>
@@ -121,11 +89,11 @@
         <input type="text" id="wNewGu" placeholder="Gujarati (roman)">
       </div>
       <div class="row" style="margin-top:8px">
-        <input type="text" id="wNewSd" placeholder="Sindhi (roman)">
         <button class="btn small" id="wAdd" type="button">Add</button>
       </div>
-      <p class="muted" style="margin-top:8px">Added words live on this phone until
-        exported. They start on their emoji.</p>
+      <p class="muted" id="wAddMsg">A word added here has no picture and no
+         audio clip, so it shows its emoji and speaks in English and Hindi only.
+         Tell Claude and it gets both, permanently.</p>
     </div>
     <div class="card">
       <h2>All words</h2>
@@ -145,30 +113,20 @@
     </div>
     <div class="card">
       <h2>Import from the other phone</h2>
-      <p>Merges. The same tap can never be counted twice.</p>
+      <p>Merges. The same tap can never be counted twice, so importing the same
+         file twice is harmless.</p>
       <input type="file" id="importFile" accept=".json,application/json">
       <p class="muted" id="importMsg"></p>
-    </div>
-    <div class="card">
-      <h2>Voice recordings backup</h2>
-      <p>Exports every recording as one zip, so they can be committed into the
-         project permanently and stop living in a browser.</p>
-      <button class="btn light" id="doZip" type="button">Export recordings (.zip)</button>
-      <input type="file" id="importZip" accept=".zip" style="margin-top:8px">
-      <p class="muted" id="zipMsg"></p>
     </div>
   </div>
 
   <!-- ---------- settings ---------- -->
   <div class="panel" id="panelSettings">
     <div class="card">
-      <h2>This phone is</h2>
-      <select id="setDevice">
-        <option value="mum">Mum's phone</option>
-        <option value="dad">Dad's phone</option>
-      </select>
-      <p class="muted">Sets which voice slot new recordings fill for English and
-         Hindi. Gujarati is always Mum, Sindhi is always Dad.</p>
+      <h2>Name this phone</h2>
+      <input type="text" id="setDeviceLabel" placeholder="e.g. Dad's phone">
+      <p class="muted">Only used to label the file you export, so you can tell
+         the two phones apart.</p>
     </div>
     <div class="card">
       <h2>Show native script</h2>
@@ -176,7 +134,8 @@
         <option value="0">No &mdash; roman only</option>
         <option value="1">Yes &mdash; under the roman</option>
       </select>
-      <p class="muted">Roman spelling is always what you read first.</p>
+      <p class="muted">Roman spelling is always what you read first on the
+         dinner card.</p>
     </div>
     <div class="card">
       <h2>Storage</h2>
@@ -189,7 +148,7 @@
 <!-- ==================================================== DINNER CARD ====== -->
 <div id="dinner" class="screen">
   <div class="pbar">
-    <h1>Tonight's four words</h1>
+    <h1>Tonight's words</h1>
     <button class="btn small light" id="dBack" type="button">Close</button>
   </div>
   <div id="dinnerList"></div>
@@ -199,7 +158,6 @@
 
 <script src="js/words.js"></script>
 <script src="js/db.js"></script>
-<script src="js/zip.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/scheduler.js"></script>
 <script src="js/share.js"></script>
