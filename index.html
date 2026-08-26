@@ -48,6 +48,7 @@
   <!-- ---------- menu ---------- -->
   <div class="panel on" id="panelMenu">
     <button class="btn" id="goEnd" type="button">End session &rarr; dinner card</button>
+    <button class="btn light" id="goVoices" type="button">Voices &mdash; record over a word</button>
     <button class="btn light" id="goLog" type="button">Today's log</button>
     <button class="btn light" id="goWords" type="button">Word editor</button>
     <button class="btn light" id="goShare" type="button">End day: export &amp; sync</button>
@@ -56,6 +57,63 @@
       <h2>Audio</h2>
       <div class="covbar"><i id="covFill" style="width:0%"></i></div>
       <p class="muted" id="covText">counting&hellip;</p>
+    </div>
+  </div>
+
+  <!-- ---------- voices ---------- -->
+  <!-- Record a real voice over the generated clip, one word and one language at
+       a time. Anything not recorded keeps its generated clip. -->
+  <div class="panel" id="panelVoices">
+    <div class="row" style="margin-bottom:10px">
+      <select id="vLang"></select>
+      <select id="vFilter">
+        <option value="all">All words</option>
+        <option value="mine">Only mine</option>
+        <option value="todo">Not yet mine</option>
+      </select>
+    </div>
+
+    <div class="card" id="vCurrent">
+      <div id="vEmoji" style="font-size:44px;text-align:center"></div>
+      <div id="vRoman" style="font-size:34px;font-weight:700;text-align:center">&mdash;</div>
+      <div id="vNative" style="font-size:19px;color:var(--dim);text-align:center"></div>
+      <div id="vStatus" class="muted" style="text-align:center;margin-top:6px"></div>
+
+      <div class="row" style="margin-top:12px">
+        <button class="btn small light" id="vPlayGen"  type="button">Play generated</button>
+        <button class="btn small light" id="vPlayMine" type="button" disabled>Play mine</button>
+      </div>
+
+      <button id="vRecBtn" type="button">Hold to<br>record</button>
+
+      <div class="row">
+        <button class="btn small light" id="vUploadBtn" type="button">Upload a file</button>
+        <button class="btn small warn"  id="vDelete"    type="button" disabled>Delete mine</button>
+      </div>
+      <input type="file" id="vUpload" accept="audio/*" style="display:none">
+      <p class="muted" id="vMsg"></p>
+    </div>
+
+    <div class="covbar"><i id="vCovFill" style="width:0%"></i></div>
+    <p class="muted" id="vCov"></p>
+
+    <div class="card">
+      <h2>Words</h2>
+      <div class="wlist" id="vList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Move them to the other phone</h2>
+      <p>Exports every recording on this phone as one zip. Send it to your wife
+         and she taps Import, or send it to Claude to bake into the app for good.</p>
+      <button class="btn light" id="vExport" type="button">Export voices (.zip)</button>
+      <input type="file" id="vImport" accept=".zip" style="margin-top:8px">
+      <p class="muted" id="vZipMsg"></p>
+    </div>
+
+    <div class="card">
+      <h2>Microphone</h2>
+      <p class="muted" id="vMic">checking&hellip;</p>
     </div>
   </div>
 
@@ -158,6 +216,7 @@
 
 <script src="js/words.js"></script>
 <script src="js/db.js"></script>
+<script src="js/zip.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/scheduler.js"></script>
 <script src="js/share.js"></script>

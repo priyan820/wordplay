@@ -10,7 +10,7 @@
  * kind of chore that eventually gets forgotten and breaks offline mode.
  */
 
-var VERSION = "wordplay-v2";
+var VERSION = "wordplay-v3";
 
 var CORE = [
   "./",
@@ -19,6 +19,7 @@ var CORE = [
   "css/app.css",
   "js/words.js",
   "js/db.js",
+  "js/zip.js",
   "js/audio.js",
   "js/scheduler.js",
   "js/share.js",
@@ -63,10 +64,22 @@ function listAssets() {
     })
     .catch(function () { return []; });
 
+  /* Recorded overrides, committed into /voice/. Same trick as the other two:
+   * read the list from its manifest so adding recordings never means
+   * hand-editing this file. */
+  var voice = fetch("voice/manifest.json", { cache: "reload" })
+    .then(function (r) { return r.ok ? r.json() : {}; })
+    .then(function (j) {
+      var out = ["voice/manifest.json"];
+      Object.keys(j || {}).forEach(function (k) { out.push("voice/" + j[k]); });
+      return out;
+    })
+    .catch(function () { return []; });
+
   var manifests = Promise.resolve(["images/manifest.json"]);
 
-  return Promise.all([images, audio, manifests]).then(function (r) {
-    return r[0].concat(r[1], r[2]);
+  return Promise.all([images, audio, voice, manifests]).then(function (r) {
+    return r[0].concat(r[1], r[2], r[3]);
   });
 }
 

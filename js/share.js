@@ -6,8 +6,9 @@
  *
  * Export -> share sheet -> WhatsApp or AirDrop -> other phone imports -> merge.
  *
- * Only progress moves this way. Photos and audio are static files in the repo
- * and arrive with the app itself, so there is nothing large to send.
+ * Progress moves this way, and so do your own recordings - exported as one zip
+ * so they can be carried to the other phone or committed into the repo. Photos
+ * and the generated clips ship with the app and never need sending.
  */
 
 var SHARE = (function () {
@@ -155,6 +156,87 @@ var SHARE = (function () {
     return file.text().then(function (t) { return mergeData(JSON.parse(t)); });
   }
 
+  function extFor(mime) {
+    if (!mime) return "bin";
+    if (mime.indexOf("mp4") !== -1 || mime.indexOf("aac") !== -1) return "m4a";
+    if (mime.indexOf("webm") !== -1) return "webm";
+    if (mime.indexOf("ogg") !== -1) return "ogg";
+    if (mime.indexOf("wav") !== -1) return "wav";
+    if (mime.indexOf("mpeg") !== -1) return "mp3";
+    return "bin";
+  }
+
+  function fileNameFor(rec) {
+    return rec.wordId + "__" + rec.lang + "." + extFor(rec.mime);
+  }
+
+  function exportRecordings() {
+    return DB.all("recordings").then(function (rows) {
+      rows = rows || [];
+      if (!rows.length) return Promise.reject(new Error("You have not recorded anything on this phone yet."));
+
+      var manifest = {};
+      return Promise.all(rows.map(function (r) {
+        return r.blob.arrayBuffer().then(function (buf) {
+          var name = fileNameFor(r);
+          manifest[r.key] = name;
+          return { name: "voice/" + name, bytes: new Uint8Array(buf) };
+        });
+      })).then(function (files) {
+        var enc = new TextEncoder();
+        files.push({
+          name: "voice/manifest.json",
+          bytes: enc.encode(JSON.stringify(manifest, null, 2))
+        });
+        var blob = ZIP.write(files);
+        var name = "wordplay-voices-" + stamp() + ".zip";
+        return shareFile(blob, name, "Wordplay recordings", null).then(function (how) {
+          return { how: how, count: rows.length, bytes: blob.size, name: name };
+        });
+      });
+    });
+  }
+
+  function importRecordings(file) {
+    return file.arrayBuffer().then(function (buf) {
+      var entries = ZIP.read(buf);
+      var manifestEntry = entries.filter(function (e) { return /manifest\.json$/.test(e.name); })[0];
+      var map = {};
+      if (manifestEntry) {
+        var byName = {};
+        var parsed = JSON.parse(new TextDecoder().decode(manifestEntry.bytes));
+        Object.keys(parsed).forEach(function (k) { byName[parsed[k]] = k; });
+        map = byName;
+      }
+
+      var rows = [];
+      entries.forEach(function (e) {
+        if (/manifest\.json$/.test(e.name)) return;
+        var base = e.name.split("/").pop();
+        var key = map[base];
+        if (!key) {
+          /* Fall back to the filename shape: word__lang__voice.ext */
+          var m = base.match(/^(.+?)__(.+?)\.[a-z0-9]+$/);
+          if (!m) return;
+          key = m[1] + "|" + m[2];
+        }
+        var parts = key.split("|");
+        var mime = /\.m4a$/.test(base) ? "audio/mp4"
+                 : /\.webm$/.test(base) ? "audio/webm"
+                 : /\.ogg$/.test(base) ? "audio/ogg" : "application/octet-stream";
+        rows.push({
+          key: key, wordId: parts[0], lang: parts[1],
+          blob: new Blob([e.bytes], { type: mime }),
+          mime: mime, bytes: e.bytes.length, ts: Date.now(), source: "imported"
+        });
+      });
+
+      return DB.putMany("recordings", rows)
+        .then(AUDIO.refreshLocalKeys)
+        .then(function () { return { count: rows.length }; });
+    });
+  }
+
   /* --------------------------------------------------------- dinner card -- */
 
   /* Three words to use out loud tonight, one per language, drawn from what she
@@ -276,7 +358,8 @@ var SHARE = (function () {
 
   return {
     exportDay: exportDay, importJsonFile: importJsonFile, mergeData: mergeData,
+    exportRecordings: exportRecordings, importRecordings: importRecordings,
     dinnerCard: dinnerCard, shareDinnerCard: shareDinnerCard,
-    deviceId: deviceId
+    deviceId: deviceId, fileNameFor: fileNameFor, extFor: extFor
   };
 }());

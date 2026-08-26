@@ -1,0 +1,4 @@
+# This is a private family app. Nothing here is meant to be found by search.
+# It also carries recordings of a family member's voice, so keep crawlers out.
+User-agent: *
+Disallow: /

@@ -22,6 +22,21 @@ long-press and is for the adults.
 Nothing to set up. Every word ships with a photo and a spoken clip in all three languages,
 committed into this repo as ordinary files. Open it once and it works, offline, forever.
 
+## Recording over a word
+
+The generated clips get some Hindi and Gujarati words wrong. **Parent zone → Voices** lets you
+replace any single word in any single language with a real voice — hold to record, or upload a
+clip made in Voice Memos. Anything you don't record keeps its generated clip, so this can be
+left half-done for ever without the app breaking.
+
+Recordings made on a phone work there immediately. To get them onto the other phone, tap
+**Export voices (.zip)** and either AirDrop it across for her to import, or send it to Claude to
+run through `install-voices.ps1`, which bakes them into `/voice/` so both phones get them
+permanently.
+
+Audio resolves in this order: your recording on this phone → a committed one in `/voice/` →
+the generated clip in `/audio/` → the phone's own voice (English and Hindi only) → silence.
+
 **Always open it from the home-screen icon, never a Safari tab.** Safari deletes stored data
 for ordinary websites after 7 days of not visiting. Home-screen apps are exempt.
 
@@ -42,9 +57,11 @@ teach her a subtly wrong word every single time — or leaving it out. It was le
 | `audio/` | 225 clips — 75 words × 3 languages — committed as permanent files. |
 | `fetch-images.ps1` | One-time image fetcher. **Never runs on a phone.** |
 | `fetch-audio.ps1` | One-time audio generator. **Never runs on a phone.** |
+| `install-voices.ps1` | Bakes an exported voices zip into `/voice/`. **Never runs on a phone.** |
+| `voice/` | Your recordings, once committed. Overrides the generated clip. |
 | `fetch-images.js` | Node version of the image fetcher, for a machine that has Node. |
 
-The two `fetch-*` scripts are workshop tools. They run once, on a computer, and their only
+The `fetch-*` and `install-*` scripts are workshop tools. They run once, on a computer, and their only
 output is ordinary `.jpg` and `.mp3` files committed here. The deployed app never calls them
 and has no network dependency for pictures or sound.
 

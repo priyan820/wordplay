@@ -3,9 +3,9 @@
  * Reached by a 3-second press in the top-left corner. Nothing here is ever
  * visible to her, and nothing here sits on a path she can reach by tapping.
  *
- * There is no recording booth any more. Every word ships a generated audio clip
- * for every language, so there is nothing to record and no microphone anywhere
- * in this app.
+ * The Voices panel is the one place a microphone is used. It records a real
+ * voice over the generated clip for one word in one language; everything not
+ * recorded keeps its generated clip, so the app is never half-finished.
  */
 
 var PARENT = (function () {
@@ -13,9 +13,27 @@ var PARENT = (function () {
 
   var showScript = false;
 
+  /* ---- Voices panel state ---- */
+  var vLang = "hi";        /* Hindi first: it is the one being mispronounced */
+  var vList = [];
+  var vIdx = 0;
+  var recorder = null;
+  var chunks = [];
+  var mimeType = null;
+
   /* --------------------------------------------------------------- setup -- */
 
   function init() {
+    /* iPhones do not record the format most tutorials assume - Safari produces
+     * mp4/AAC, not webm/opus - so the format is chosen from what the phone
+     * actually reports rather than hard-coded. */
+    mimeType = ["audio/mp4", "audio/mp4;codecs=mp4a.40.2",
+                "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
+      .filter(function (t) {
+        try { return window.MediaRecorder && MediaRecorder.isTypeSupported(t); }
+        catch (e) { return false; }
+      })[0] || null;
+
     wire();
     return Promise.all([
       DB.metaGet("deviceLabel", ""),
@@ -29,7 +47,7 @@ var PARENT = (function () {
 
   function wire() {
     var panels = {
-      goEnd: null, goLog: "panelLog", goWords: "panelWords",
+      goEnd: null, goVoices: "panelVoices", goLog: "panelLog", goWords: "panelWords",
       goShare: "panelShare", goSettings: "panelSettings"
     };
     Object.keys(panels).forEach(function (id) {
@@ -59,19 +77,57 @@ var PARENT = (function () {
     });
 
     document.getElementById("wAdd").addEventListener("click", addWord);
+
+    /* ---- voices ---- */
+    LANGS.forEach(function (L) {
+      var o = document.createElement("option");
+      o.value = L.code; o.textContent = L.name;
+      document.getElementById("vLang").appendChild(o);
+    });
+    document.getElementById("vLang").value = vLang;
+    document.getElementById("vLang").addEventListener("change", function () {
+      vLang = this.value; buildVoiceList();
+    });
+    document.getElementById("vFilter").addEventListener("change", buildVoiceList);
+
+    document.getElementById("vPlayGen").addEventListener("click", function () {
+      var w = vWord(); if (!w) return;
+      AUDIO.unlock(); AUDIO.playGenerated(w.id, vLang);
+    });
+    document.getElementById("vPlayMine").addEventListener("click", function () {
+      var w = vWord(); if (!w) return;
+      AUDIO.unlock(); AUDIO.playOverride(w.id, vLang);
+    });
+    document.getElementById("vDelete").addEventListener("click", deleteMine);
+
+    var rb = document.getElementById("vRecBtn");
+    rb.addEventListener("touchstart", function (e) { e.preventDefault(); startRec(); });
+    rb.addEventListener("touchend",   function (e) { e.preventDefault(); stopRec(); });
+    rb.addEventListener("mousedown", startRec);
+    rb.addEventListener("mouseup", stopRec);
+    rb.addEventListener("mouseleave", function () { if (recorder) stopRec(); });
+
+    document.getElementById("vUploadBtn").addEventListener("click", function () {
+      document.getElementById("vUpload").click();
+    });
+    document.getElementById("vUpload").addEventListener("change", uploadFile);
+
+    document.getElementById("vExport").addEventListener("click", exportVoices);
+    document.getElementById("vImport").addEventListener("change", importVoices);
   }
 
   function openPanel(id) {
-    ["panelMenu", "panelLog", "panelWords", "panelShare", "panelSettings"]
+    ["panelMenu", "panelVoices", "panelLog", "panelWords", "panelShare", "panelSettings"]
       .forEach(function (p) {
         document.getElementById(p).classList.toggle("on", p === (id || "panelMenu"));
       });
     var titles = {
-      panelLog: "Today's log", panelWords: "Word editor",
+      panelVoices: "Voices", panelLog: "Today's log", panelWords: "Word editor",
       panelShare: "End day", panelSettings: "Settings"
     };
     document.getElementById("pTitle").textContent = titles[id] || "Parent zone";
 
+    if (id === "panelVoices")   { buildVoiceList(); renderMicStatus(); }
     if (id === "panelLog")      renderLog();
     if (id === "panelWords")    renderWords();
     if (id === "panelSettings") renderStorage();
@@ -182,6 +238,249 @@ var PARENT = (function () {
     });
   }
 
+
+  /* ============================================================== VOICES == */
+  /* Record a real voice over the generated clip, one word and one language at
+   * a time. Whatever is not recorded keeps its generated clip, so this can be
+   * left half-done for ever without the app breaking. */
+
+  function vWord() { return vList[vIdx] || null; }
+
+  function buildVoiceList() {
+    vLang = document.getElementById("vLang").value || vLang;
+    var filter = document.getElementById("vFilter").value;
+    vList = WORDS.filter(function (w) {
+      var mine = AUDIO.hasOverride(w.id, vLang);
+      if (filter === "mine") return mine;
+      if (filter === "todo") return !mine;
+      return true;
+    });
+    if (vIdx >= vList.length) vIdx = 0;
+    renderVoiceList();
+    showVoiceWord();
+  }
+
+  function renderVoiceList() {
+    var list = document.getElementById("vList");
+    list.innerHTML = "";
+    vList.forEach(function (w, i) {
+      var row = document.createElement("div");
+      row.className = "wrow";
+      var mine = AUDIO.hasOverride(w.id, vLang);
+      row.innerHTML =
+        '<div class="e">' + w.emoji + '</div>' +
+        '<div class="n">' + esc(w.labels[vLang].roman) + '</div>' +
+        '<div class="t">' + (mine ? "yours" : "generated") + '</div>';
+      if (i === vIdx) row.style.background = "#f2ede2";
+      row.addEventListener("click", function () {
+        vIdx = i; renderVoiceList(); showVoiceWord();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  function showVoiceWord() {
+    var w = vWord();
+    document.getElementById("vMsg").textContent = "";
+
+    if (!w) {
+      document.getElementById("vEmoji").textContent = "";
+      document.getElementById("vRoman").textContent = "Nothing here";
+      document.getElementById("vNative").textContent = "";
+      document.getElementById("vStatus").textContent = "Try a different filter.";
+      document.getElementById("vPlayMine").disabled = true;
+      document.getElementById("vDelete").disabled = true;
+      renderVoiceCoverage();
+      return;
+    }
+
+    var label = w.labels[vLang];
+    document.getElementById("vEmoji").textContent = w.emoji;
+    /* Roman first and biggest - it is what you can actually read while holding
+     * down a record button. */
+    document.getElementById("vRoman").textContent = label.roman;
+    document.getElementById("vNative").textContent = showScript ? label.text : "";
+
+    var mine = AUDIO.hasOverride(w.id, vLang);
+    var local = AUDIO.overrideIsLocal(w.id, vLang);
+    document.getElementById("vStatus").textContent =
+      (vIdx + 1) + " of " + vList.length + "  ·  " +
+      (mine ? (local ? "your recording (on this phone)" : "your recording (built in)")
+            : "generated clip");
+
+    document.getElementById("vPlayMine").disabled = !mine;
+    /* Only a recording held on this phone can be deleted here. A built-in one
+     * lives in the repo and has to be removed there. */
+    document.getElementById("vDelete").disabled = !local;
+    renderVoiceCoverage();
+  }
+
+  function renderVoiceCoverage() {
+    var n = AUDIO.overrideCount(vLang);
+    var pct = WORDS.length ? Math.round((n / WORDS.length) * 100) : 0;
+    document.getElementById("vCovFill").style.width = pct + "%";
+    var name = (LANGS.filter(function (L) { return L.code === vLang; })[0] || {}).name || vLang;
+    document.getElementById("vCov").textContent =
+      n + " of " + WORDS.length + " " + name + " words use your voice." +
+      (n ? "" : " The rest use the generated clip, which is fine.");
+  }
+
+  /* ---- capture ---- */
+
+  function startRec() {
+    var w = vWord();
+    if (!w || recorder) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      document.getElementById("vMsg").textContent =
+        "This phone will not give the app a microphone. Use Upload a file instead.";
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      chunks = [];
+      try {
+        recorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType })
+                            : new MediaRecorder(stream);
+      } catch (e) {
+        document.getElementById("vMsg").textContent = "Recorder would not start: " + e.message;
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        return;
+      }
+
+      recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+
+      recorder.onstop = function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        var type = recorder.mimeType || mimeType || "audio/mp4";
+        var blob = new Blob(chunks, { type: type });
+        recorder = null;
+        document.getElementById("vRecBtn").classList.remove("recording");
+        if (!blob.size) {
+          document.getElementById("vMsg").textContent =
+            "That recorded nothing. Check the phone is not muted, and hold the " +
+            "button down while you speak.";
+          return;
+        }
+        saveOverride(blob, type, "recorded");
+      };
+
+      recorder.start();
+      document.getElementById("vRecBtn").classList.add("recording");
+      document.getElementById("vMsg").textContent = "Recording - say the word, then let go.";
+    }).catch(function (err) {
+      document.getElementById("vMsg").textContent =
+        err && err.name === "NotAllowedError"
+          ? "Microphone denied. Delete the home-screen icon, add it again from Safari " +
+            "and allow the microphone. Or just use Upload a file."
+          : "Microphone error: " + (err && err.message);
+    });
+  }
+
+  function stopRec() {
+    if (recorder && recorder.state !== "inactive") {
+      try { recorder.stop(); } catch (e) { recorder = null; }
+    }
+  }
+
+  /* Uploading matters as much as recording: a clip made in Voice Memos, where
+   * you can retake it properly, is often better than one held-button take. */
+  function uploadFile(e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    e.target.value = "";
+    if (!vWord()) return;
+    saveOverride(f, f.type || "audio/mpeg", "uploaded");
+  }
+
+  function saveOverride(blob, type, source) {
+    var w = vWord();
+    if (!w) return;
+    DB.put("recordings", {
+      key: w.id + "|" + vLang, wordId: w.id, lang: vLang,
+      blob: blob, mime: type, bytes: blob.size, ts: Date.now(), source: source
+    })
+      .then(AUDIO.refreshLocalKeys)
+      .then(function () {
+        document.getElementById("vMsg").textContent =
+          "Saved " + Math.round(blob.size / 1024) + " KB. She will hear this from now on.";
+        renderVoiceList();
+        showVoiceWord();
+      })
+      .catch(function (err) {
+        document.getElementById("vMsg").textContent = "Could not save it: " + err.message;
+      });
+  }
+
+  function deleteMine() {
+    var w = vWord();
+    if (!w) return;
+    DB.del("recordings", w.id + "|" + vLang)
+      .then(AUDIO.refreshLocalKeys)
+      .then(function () {
+        document.getElementById("vMsg").textContent = "Deleted. Back to the generated clip.";
+        renderVoiceList();
+        showVoiceWord();
+      });
+  }
+
+  /* ---- moving them between phones ---- */
+
+  function exportVoices() {
+    document.getElementById("vZipMsg").textContent = "Zipping…";
+    SHARE.exportRecordings().then(function (r) {
+      document.getElementById("vZipMsg").textContent =
+        r.count + " recordings, " + Math.round(r.bytes / 1024) + " KB. " +
+        (r.how === "shared" ? "Sent."
+         : r.how === "cancelled" ? "Cancelled."
+         : "Saved to your files.");
+    }).catch(function (e) {
+      document.getElementById("vZipMsg").textContent = e.message;
+    });
+  }
+
+  function importVoices(e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    document.getElementById("vZipMsg").textContent = "Restoring…";
+    SHARE.importRecordings(f).then(function (r) {
+      document.getElementById("vZipMsg").textContent = "Restored " + r.count + " recordings.";
+      buildVoiceList();
+    }).catch(function (err) {
+      document.getElementById("vZipMsg").textContent = "Could not read that zip: " + err.message;
+    });
+  }
+
+  /* ---- microphone status ---- */
+  /* This replaces the standalone mic-test page. If iOS refuses the microphone
+   * inside a home-screen app, it says so here in a plain sentence instead of
+   * looking like the app is broken. */
+
+  function renderMicStatus() {
+    var el = document.getElementById("vMic");
+    if (!window.MediaRecorder) {
+      el.textContent = "This phone cannot record at all (it needs iOS 14.3 or newer). " +
+                       "Upload a file instead - that always works.";
+      return;
+    }
+    if (!window.isSecureContext) {
+      el.textContent = "Not a secure connection, so iOS will block the microphone.";
+      return;
+    }
+    var fmt = mimeType || "the phone's default format";
+    var asked = "iOS will ask for the microphone the first time you record.";
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: "microphone" }).then(function (st) {
+        el.textContent = "Records as " + fmt + ". Permission: " + st.state +
+          (st.state === "denied"
+            ? ". Delete the home-screen icon and add it again from Safari to be asked afresh."
+            : ".");
+      }).catch(function () {
+        el.textContent = "Records as " + fmt + ". " + asked;
+      });
+    } else {
+      el.textContent = "Records as " + fmt + ". " + asked;
+    }
+  }
+
   /* ------------------------------------------------------- export/import -- */
 
   function msg(id, text) { document.getElementById(id).textContent = text; }
@@ -225,5 +524,8 @@ var PARENT = (function () {
     });
   }
 
-  return { init: init, onOpen: onOpen, openPanel: openPanel, renderCoverage: renderCoverage };
+  return {
+    init: init, onOpen: onOpen, openPanel: openPanel,
+    renderCoverage: renderCoverage, buildVoiceList: buildVoiceList
+  };
 }());

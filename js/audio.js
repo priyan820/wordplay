@@ -1,18 +1,20 @@
 /* audio.js - what she hears.
  *
- * Every word ships a real audio file for every language, generated once at
- * build time and committed to the repo. So this file has one job: look the
- * clip up and play it.
+ * Every word ships a generated clip for every language, committed to the repo.
+ * On top of that sits an OVERRIDE layer: a real human recording for a specific
+ * word in a specific language, which wins whenever it exists. That is how a
+ * mispronounced Hindi or Gujarati word gets fixed one word at a time without
+ * anything else changing.
  *
- * That is a deliberate simplification. An earlier version tried to pick between
- * a parent recording, a committed file and the phone's own voice, which meant
- * the app sounded different on each phone depending on which voices iOS
- * happened to ship. Now both phones sound identical and it works offline from
- * the first launch.
+ * Resolution order, highest first:
+ *   1. a recording made on THIS phone   (live the instant it is made)
+ *   2. a committed override in /voice/  (how the other phone gets it)
+ *   3. the generated clip in /audio/    (unchanged for anything unrecorded)
+ *   4. speechSynthesis, English and Hindi only, if a file fails to load
+ *   5. silence
  *
- * speechSynthesis survives only as a last resort, for English and Hindi, if a
- * file ever fails to load. Gujarati has no iOS voice, so a missing Gujarati
- * file means silence rather than a guess.
+ * Nothing here depends on which voices a given iPhone ships, so both phones
+ * sound the same and it all works offline.
  */
 
 var AUDIO = (function () {
@@ -20,16 +22,35 @@ var AUDIO = (function () {
 
   var ctx = null;
   var unlocked = false;
-  var manifest = {};      /* "water|hi" -> "water__hi.mp3" */
+  var manifest = {};      /* generated: "water|hi" -> "water__hi.mp3"        */
+  var voiceManifest = {}; /* committed overrides: "water|hi" -> "water__hi.m4a" */
+  var localKeys = {};     /* overrides recorded on THIS phone, from IndexedDB   */
   var current = null;
 
   /* ------------------------------------------------------------- startup -- */
 
   function init() {
-    return fetch("audio/manifest.json", { cache: "no-cache" })
+    var gen = fetch("audio/manifest.json", { cache: "no-cache" })
       .then(function (r) { return r.ok ? r.json() : {}; })
       .then(function (j) { manifest = j || {}; })
       .catch(function () { manifest = {}; });
+
+    var voi = fetch("voice/manifest.json", { cache: "no-cache" })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { voiceManifest = j || {}; })
+      .catch(function () { voiceManifest = {}; });
+
+    return Promise.all([gen, voi, refreshLocalKeys()]);
+  }
+
+  /* Which words this phone has its own recording for. Read once at startup and
+   * again after every record, upload, delete or import. */
+  function refreshLocalKeys() {
+    return DB.all("recordings").then(function (rows) {
+      localKeys = {};
+      (rows || []).forEach(function (r) { localKeys[r.key] = true; });
+      return localKeys;
+    }).catch(function () { localKeys = {}; return localKeys; });
   }
 
   /* iOS plays nothing until a real finger has touched the screen. Every sound
@@ -51,6 +72,20 @@ var AUDIO = (function () {
   function keyFor(wordId, lang) { return wordId + "|" + lang; }
   function hasClip(wordId, lang) { return !!manifest[keyFor(wordId, lang)]; }
   function canSpeak(lang) { return TTS_LANGS.indexOf(lang) !== -1; }
+
+  /* True when a human recording replaces the generated clip - either one made
+   * on this phone, or one committed into /voice/ and shipped with the app. */
+  function hasOverride(wordId, lang) {
+    var k = keyFor(wordId, lang);
+    return !!(localKeys[k] || voiceManifest[k]);
+  }
+  function overrideIsLocal(wordId, lang) { return !!localKeys[keyFor(wordId, lang)]; }
+
+  function overrideCount(lang) {
+    var n = 0;
+    WORDS.forEach(function (w) { if (hasOverride(w.id, lang)) n++; });
+    return n;
+  }
 
   /* The scheduler asks this before queueing a word. With a full set of clips
    * this is true for everything, but it stays honest if one is ever missing. */
@@ -84,9 +119,24 @@ var AUDIO = (function () {
   function stop() {
     if (current) {
       try { current.pause(); } catch (e) {}
+      if (current._url) URL.revokeObjectURL(current._url);
       current = null;
     }
     try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+  }
+
+  function playBlob(blob) {
+    return new Promise(function (resolve) {
+      stop();
+      var url = URL.createObjectURL(blob);
+      var el = new Audio();
+      el._url = url;
+      el.src = url;
+      current = el;
+      el.onended = function () { URL.revokeObjectURL(url); resolve(true); };
+      el.onerror = function () { URL.revokeObjectURL(url); resolve(false); };
+      el.play().catch(function () { resolve(false); });
+    });
   }
 
   function playUrl(url) {
@@ -138,11 +188,56 @@ var AUDIO = (function () {
       return Promise.resolve({ played: false, voice: "none" });
     }
 
+    var key = keyFor(wordId, lang);
+
+    function generated() {
+      var file = manifest[key];
+      if (!file) return fallback();
+      return playUrl("audio/" + file).then(function (ok) {
+        return ok ? { played: true, voice: "clip" } : fallback();
+      });
+    }
+
+    /* 1. a recording made on this phone - live the moment it is made */
+    if (localKeys[key]) {
+      return DB.get("recordings", key).then(function (rec) {
+        if (rec && rec.blob) {
+          return playBlob(rec.blob).then(function (ok) {
+            return ok ? { played: true, voice: "mine" } : generated();
+          });
+        }
+        return generated();
+      }).catch(generated);
+    }
+
+    /* 2. a committed override, which is how the other phone gets it */
+    if (voiceManifest[key]) {
+      return playUrl("voice/" + voiceManifest[key]).then(function (ok) {
+        return ok ? { played: true, voice: "mine" } : generated();
+      });
+    }
+
+    /* 3. the generated clip - unchanged for every word you have not recorded */
+    return generated();
+  }
+
+  /* Play a specific layer, for the parent zone: compare yours against the
+   * generated one without changing what the app would normally choose. */
+  function playGenerated(wordId, lang) {
     var file = manifest[keyFor(wordId, lang)];
-    if (!file) return fallback();
-    return playUrl("audio/" + file).then(function (ok) {
-      return ok ? { played: true, voice: "clip" } : fallback();
-    });
+    if (!file) return Promise.resolve(false);
+    return playUrl("audio/" + file);
+  }
+
+  function playOverride(wordId, lang) {
+    var key = keyFor(wordId, lang);
+    if (localKeys[key]) {
+      return DB.get("recordings", key).then(function (rec) {
+        return rec && rec.blob ? playBlob(rec.blob) : false;
+      });
+    }
+    if (voiceManifest[key]) return playUrl("voice/" + voiceManifest[key]);
+    return Promise.resolve(false);
   }
 
   /* ------------------------------------------------------------- chimes -- */
@@ -172,7 +267,10 @@ var AUDIO = (function () {
   return {
     init: init, unlock: unlock, stop: stop,
     playWord: playWord, chime: chime, speak: speak,
+    playGenerated: playGenerated, playOverride: playOverride,
     hasClip: hasClip, isPlayable: isPlayable, canSpeak: canSpeak,
+    hasOverride: hasOverride, overrideIsLocal: overrideIsLocal,
+    overrideCount: overrideCount, refreshLocalKeys: refreshLocalKeys,
     coverage: coverage, missing: missing
   };
 }());
