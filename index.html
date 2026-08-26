@@ -47,11 +47,10 @@
 
   <!-- ---------- menu ---------- -->
   <div class="panel on" id="panelMenu">
-    <button class="btn" id="goEnd" type="button">End session &rarr; dinner card</button>
+    <button class="btn" id="goEnd" type="button">End the day</button>
     <button class="btn light" id="goVoices" type="button">Voices &mdash; record over a word</button>
     <button class="btn light" id="goLog" type="button">Today's log</button>
     <button class="btn light" id="goWords" type="button">Word editor</button>
-    <button class="btn light" id="goShare" type="button">End day: export &amp; sync</button>
     <button class="btn light" id="goSettings" type="button">Settings</button>
     <div class="card" style="margin-top:14px">
       <h2>Audio</h2>
@@ -159,25 +158,6 @@
     </div>
   </div>
 
-  <!-- ---------- export / import ---------- -->
-  <div class="panel" id="panelShare">
-    <div class="card">
-      <h2>End day export</h2>
-      <p>One small file with everything: taps, scores, streaks, schedule.
-         Sends through the share sheet &mdash; AirDrop or WhatsApp.
-         Nothing is ever uploaded anywhere.</p>
-      <button class="btn" id="doExport" type="button">Export today &amp; share</button>
-      <p class="muted" id="exportMsg"></p>
-    </div>
-    <div class="card">
-      <h2>Import from the other phone</h2>
-      <p>Merges. The same tap can never be counted twice, so importing the same
-         file twice is harmless.</p>
-      <input type="file" id="importFile" accept=".json,application/json">
-      <p class="muted" id="importMsg"></p>
-    </div>
-  </div>
-
   <!-- ---------- settings ---------- -->
   <div class="panel" id="panelSettings">
     <div class="card">
@@ -196,6 +176,16 @@
          dinner card.</p>
     </div>
     <div class="card">
+      <h2>Backup (optional)</h2>
+      <p>Progress lives on this phone and needs no syncing - today's results
+         already decide tomorrow's first words. This is only here so a lost or
+         wiped phone doesn't take her history with it.</p>
+      <button class="btn light" id="doExport" type="button">Export a backup</button>
+      <p class="muted" id="exportMsg"></p>
+      <input type="file" id="importFile" accept=".json,application/json" style="margin-top:8px">
+      <p class="muted" id="importMsg"></p>
+    </div>
+    <div class="card">
       <h2>Storage</h2>
       <p class="muted" id="setStorage">checking&hellip;</p>
       <button class="btn light" id="setReset" type="button">Start a fresh queue now</button>
@@ -207,10 +197,12 @@
 <div id="dinner" class="screen">
   <div class="pbar">
     <h1>Tonight's words</h1>
-    <button class="btn small light" id="dBack" type="button">Close</button>
   </div>
+  <p class="muted" id="dIntro">Say these at dinner. Tomorrow starts with what she
+     missed today.</p>
   <div id="dinnerList"></div>
-  <button class="btn" id="dShare" type="button">Share this card</button>
+  <button class="btn" id="dDone" type="button">Done</button>
+  <button class="btn light" id="dShare" type="button">Share this card</button>
   <p class="muted" id="dMsg"></p>
 </div>
 

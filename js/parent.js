@@ -47,8 +47,8 @@ var PARENT = (function () {
 
   function wire() {
     var panels = {
-      goEnd: null, goVoices: "panelVoices", goLog: "panelLog", goWords: "panelWords",
-      goShare: "panelShare", goSettings: "panelSettings"
+      goEnd: null, goVoices: "panelVoices", goLog: "panelLog",
+      goWords: "panelWords", goSettings: "panelSettings"
     };
     Object.keys(panels).forEach(function (id) {
       document.getElementById(id).addEventListener("click", function () {
@@ -117,13 +117,13 @@ var PARENT = (function () {
   }
 
   function openPanel(id) {
-    ["panelMenu", "panelVoices", "panelLog", "panelWords", "panelShare", "panelSettings"]
+    ["panelMenu", "panelVoices", "panelLog", "panelWords", "panelSettings"]
       .forEach(function (p) {
         document.getElementById(p).classList.toggle("on", p === (id || "panelMenu"));
       });
     var titles = {
-      panelVoices: "Voices", panelLog: "Today's log", panelWords: "Word editor",
-      panelShare: "End day", panelSettings: "Settings"
+      panelVoices: "Voices", panelLog: "Today's log",
+      panelWords: "Word editor", panelSettings: "Settings"
     };
     document.getElementById("pTitle").textContent = titles[id] || "Parent zone";
 

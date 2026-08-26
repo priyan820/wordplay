@@ -131,12 +131,19 @@ body { position: fixed; inset: 0; width: 100%; }
   100% { transform: translate(var(--dx), var(--dy)) scale(1.15); opacity: 0; }
 }
 
-/* The hidden way in. Invisible, top-left, 3-second press. */
+/* The hidden way in. Invisible, top-left, 3-second press.
+ *
+ * It MUST start below the safe-area inset. At top:0 it sits underneath the iOS
+ * status bar in standalone mode, inside the strip iOS keeps for its own edge
+ * gestures - which fires touchcancel and silently kills the long-press timer.
+ * That is what locked us out of the parent zone until the app was relaunched.
+ * touch-action:none stops the browser claiming the area as a gesture surface. */
 #doorway {
   position: absolute;
-  top: 0; left: 0;
-  width: 84px; height: 84px;
+  top: var(--safe-top); left: 0;
+  width: 96px; height: 96px;
   z-index: 40;
+  touch-action: none;
 }
 
 /* ================================================================== PARENT == */

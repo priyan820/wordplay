@@ -91,9 +91,19 @@ var APP = (function () {
     PARENT.renderCoverage();
   }
 
+  /* End the day. One action: finish the session, then show the dinner card.
+   *
+   * Ending clears today's queue, so the next launch builds a fresh one ordered
+   * by what she got wrong today. Nothing is exported and nothing is sent
+   * anywhere - the scheduler only ever reads this phone's own log. */
   function showDinner() {
     AUDIO.stop();
     only("dinner");
+    SCHED.endDay().catch(function (e) {
+      /* Even if the queue could not be cleared, still show the card. The worst
+       * case is that tomorrow resumes today's list, not a broken screen. */
+      if (window.console) console.error("endDay failed", e);
+    });
     SHARE.dinnerCard().then(render);
 
     function render(picks) {
@@ -125,7 +135,11 @@ var APP = (function () {
     }
   }
 
-  document.getElementById("dBack").addEventListener("click", showKid);
+  /* Done is the only way off the dinner card, and it goes back to her screen
+   * with a brand-new queue underneath. */
+  document.getElementById("dDone").addEventListener("click", function () {
+    SESSION.restart().then(showKid, showKid);
+  });
 
   /* ------------------------------------------------------ service worker -- */
 

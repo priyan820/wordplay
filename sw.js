@@ -10,7 +10,7 @@
  * kind of chore that eventually gets forgotten and breaks offline mode.
  */
 
-var VERSION = "wordplay-v3";
+var VERSION = "wordplay-v4";
 
 var CORE = [
   "./",

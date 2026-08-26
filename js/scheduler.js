@@ -2,32 +2,32 @@
  *
  * Priority, in order:
  *   1. words missed yesterday
- *   2. words not heard in 4+ days
- *   3. at most TWO new words a day, ever
- *   4. then forever: cycle the known words, least-recently-heard first
+ *   2. words not heard in 4+ days, oldest first - a word never heard counts as
+ *      oldest, so new words surface naturally
+ *   3. then forever: everything else, least-recently-heard first
  *
- * Step 4 has no end condition. There is no target count, no timer and no
+ * Step 3 has no end condition. There is no target count, no timer and no
  * completion state anywhere in this file. The queue tops itself up whenever it
  * gets close to the end, so it cannot run dry however long she keeps going.
  *
+ * There used to be a hard cap of two new words a day. It was removed: with the
+ * cap in place a 300-tap session served 12 distinct words out of 75, because
+ * the endless filler could only recycle words already introduced. Every word is
+ * now in play from the first session.
+ *
  * Everything is keyed by word AND language. She may know "water" in Hindi and
- * not in Sindhi; those are different things to learn and are tracked apart.
+ * not in Gujarati; those are different things to learn and are tracked apart.
  */
 
 var SCHED = (function () {
   "use strict";
 
-  var BLOCK = 6;          /* words per language before it rotates */
-  var NEW_PER_DAY = 2;    /* hard cap from day two onward. Never more. */
+  /* Words of one language before it rotates. This is what stops a session
+   * being all-English: the queue is built in blocks of BLOCK, one language per
+   * block, so all three languages appear within the first 3 * BLOCK taps no
+   * matter how large the word pool is. */
+  var BLOCK = 6;
 
-  /* The very first session is the one exception, and it has to be.
-   *
-   * "Two new words a day" plus "cycle the known words for ever" means that on
-   * a brand-new phone there are no known words to cycle, so the queue would be
-   * two words long and then wrap - which contradicts the rule that a session
-   * never runs dry. This seeds the first session only, when there is no history
-   * whatsoever. From the second day the cap is a strict two. */
-  var FIRST_DAY_SEED = 12;
   var STALE_DAYS = 4;
   var RETIRE_AFTER = 3;   /* consecutive DAYS with a miss */
   var BATCH = 48;         /* items generated per top-up (8 blocks) */
@@ -51,8 +51,8 @@ var SCHED = (function () {
 
   /* ---------------------------------------------------------- retirement -- */
   /* Three days running with a miss on the same word+language retires that pair
-   * and pulls in an easier reserve word FOR THAT LANGUAGE ONLY. Retiring Sindhi
-   * "butterfly" leaves English "butterfly" completely alone. */
+   * and pulls in an easier reserve word FOR THAT LANGUAGE ONLY. Retiring
+   * Gujarati "butterfly" leaves English "butterfly" completely alone. */
 
   function applyRetirements(states) {
     var changed = [];
@@ -80,7 +80,7 @@ var SCHED = (function () {
           heard: 0, got: 0, missed: 0,
           missStreakDays: 0, lastMissDay: null,
           retired: false, retiredAt: null, replacedBy: null,
-          substitute: true   /* skips the two-a-day cap: a swap, not a new word */
+          substitute: true   /* a swap, not ordinary vocabulary */
         });
       }
     });
@@ -92,29 +92,18 @@ var SCHED = (function () {
   /* ------------------------------------------------------------- pooling -- */
 
   /* One ordered candidate list per language. The order IS the priority rule. */
-  function poolsFor(states, newToday) {
+  function poolsFor(states) {
     var byKey = {};
     states.forEach(function (s) { byKey[s.key] = s; });
 
     var staleBefore = Date.now() - STALE_DAYS * 86400000;
     var yday = yesterday();
+    var tday = today();
     var pools = {};
-
-    /* A cold start has no history at all. Seed it once; after that, two. */
-    var coldStart = !states.some(function (s) { return s.lastHeard; });
-    var cap = coldStart ? FIRST_DAY_SEED : NEW_PER_DAY;
-
-    /* The budget is counted in WORDS and shared across every language, not
-     * handed out per language. Four languages with two each would be eight new
-     * words a day, which is four times what was asked for. A word already
-     * introduced today may still appear in another language for free - it is
-     * the same word, not a new one. */
-    var newIds = (newToday || []).slice();
-    var budget = Math.max(0, cap - newIds.length);
 
     LANGS.forEach(function (L) {
       var lang = L.code;
-      var missed = [], stale = [], fresh = [], known = [];
+      var missed = [], everything = [];
 
       WORDS.forEach(function (w) {
         if (!AUDIO.isPlayable(w.id, lang)) return;      /* no voice: never queue it */
@@ -122,39 +111,49 @@ var SCHED = (function () {
 
         if (st && st.retired) return;
 
-        if (!st || !st.lastHeard) {
-          /* Reserve words only enter as substitutes, never as ordinary new words. */
-          if (w.tier === "reserve" && !(st && st.substitute)) return;
-          fresh.push({ wordId: w.id, lang: lang, _sub: !!(st && st.substitute) });
-          return;
+        /* Reserve words are substitutes only. They enter when retirement puts
+         * them in, never as ordinary vocabulary. */
+        var isSub = !!(st && st.substitute);
+        if (w.tier === "reserve" && !isSub) return;
+
+        var t = (st && st.lastHeard) || 0;
+
+        /* Rank keeps the original priority order intact now that every word is
+         * in the pool. Sorting purely by "last heard" would put never-heard
+         * words (time zero) ahead of everything, burying a word she has not
+         * heard for a week under sixty she has never met.
+         *   0 = heard before but not for 4+ days   - the revision that matters
+         *   1 = never heard                        - new ground
+         *   2 = heard recently                     - the endless filler */
+        var rank = (t > 0 && t < staleBefore) ? 0 : (t === 0 ? 1 : 2);
+        everything.push({ wordId: w.id, lang: lang, _t: t, _r: rank });
+
+        /* Today's misses count as well as yesterday's. Ending the day and
+         * starting again should lead with what she just got wrong, not wait
+         * until tomorrow to notice. */
+        if (st && (st.lastMissDay === yday || st.lastMissDay === tday)) {
+          missed.push({ wordId: w.id, lang: lang, _t: t });
         }
-        if (st.lastMissDay === yday)      { missed.push({ wordId: w.id, lang: lang, _t: st.lastHeard }); return; }
-        if (st.lastHeard < staleBefore)   { stale.push({ wordId: w.id, lang: lang, _t: st.lastHeard });  return; }
-        known.push({ wordId: w.id, lang: lang, _t: st.lastHeard });
       });
 
       var byOldest = function (a, b) { return (a._t || 0) - (b._t || 0); };
-      stale.sort(byOldest);
-      known.sort(byOldest);
+      var byRankThenOldest = function (a, b) {
+        return (a._r - b._r) || ((a._t || 0) - (b._t || 0));
+      };
+      missed.sort(byOldest);
+      everything.sort(byRankThenOldest);
 
-      /* Substitutions jump the queue; genuinely new words are rationed against
-       * the shared daily budget. */
-      var subs = fresh.filter(function (f) { return f._sub; });
-      var brand = [];
-      fresh.filter(function (f) { return !f._sub; }).forEach(function (f) {
-        if (newIds.indexOf(f.wordId) !== -1) { brand.push(f); return; }  /* already today's */
-        if (budget > 0) { newIds.push(f.wordId); budget--; brand.push(f); }
-      });
-
-      /* The endless filler. Everything she has already met in this language,
-       * least-recently-heard first - including the words that are also in the
-       * priority list, because once those are served they still have to be
-       * available to come round again. Falling back to the brand-new words
-       * covers the first session, when nothing has been met yet. */
-      var introduced = known.concat(missed, stale).sort(byOldest);
+      /* `priority` is served first and consumed once: the words she got wrong
+       * yesterday. `cycle` is the endless filler and holds EVERY playable word
+       * in this language, least-recently-heard first, so it both surfaces
+       * never-heard and stale words early and never runs out of variety.
+       *
+       * Words missed yesterday sit in both, which is intended - once the
+       * priority copy is served the word still has to be able to come round
+       * again later. */
       pools[lang] = {
-        priority: missed.concat(stale, subs, brand),
-        cycle: introduced.length ? introduced : brand.slice()
+        priority: missed,
+        cycle: everything
       };
     });
 
@@ -168,9 +167,8 @@ var SCHED = (function () {
    * case repeating beats emitting a short block and stalling the queue. */
   function emit(pools, startBlock, blocks, cursors) {
     /* Rotate only through languages that actually have something to play.
-     * Gujarati and Sindhi have nothing until they are recorded, and including
-     * them would emit empty blocks that slide every later block out of
-     * alignment and mix two languages into one screenful. */
+     * An empty language would emit an empty block, sliding every later block
+     * out of alignment and mixing two languages into one screenful. */
     var live = LANGS.filter(function (L) {
       var p = pools[L.code];
       return p && (p.priority.length || p.cycle.length);
@@ -219,42 +217,58 @@ var SCHED = (function () {
   function build() {
     var day = today();
     return DB.get("queue", day).then(function (existing) {
-      /* Reopening later the same day resumes the same queue, same place. */
-      if (existing && existing.items && existing.items.length) return existing;
+      /* Reopening later the same day resumes the same queue, same place -
+       * unless the day was explicitly ended, in which case a fresh queue is
+       * built from what she actually did today. */
+      if (existing && existing.items && existing.items.length && !existing.endedAt) {
+        return existing;
+      }
 
       return DB.all("state").then(function (states) {
         return applyRetirements(states || []).then(function () {
           return DB.all("state");
         });
       }).then(function (states) {
-        var pools = poolsFor(states || [], []);
+        var pools = poolsFor(states || []);
         var cursors = {};
         var q = {
           day: day,
           createdAt: Date.now(),
           cursor: 0,
           blockSize: BLOCK,
-          newToday: [],
           cursors: cursors,
           items: emit(pools, 0, Math.ceil(BATCH / BLOCK), cursors)
         };
-        /* Record which brand-new words today spent its budget on. */
-        var seenState = {};
-        (states || []).forEach(function (s) { seenState[s.key] = true; });
-        q.items.forEach(function (it) {
-          if (!seenState[keyOf(it.wordId, it.lang)] && q.newToday.indexOf(it.wordId) === -1) {
-            q.newToday.push(it.wordId);
-          }
-        });
         return DB.put("queue", q).then(function () { return q; });
       });
+    });
+  }
+
+  /* End the day. Clears today's queue so the next launch builds a new one
+   * ordered by what she got wrong today, and stamps when it happened. Nothing
+   * leaves the phone: the scheduler only ever reads this device's own log. */
+  function endDay() {
+    var day = today();
+    return DB.get("queue", day).then(function (q) {
+      var ended = {
+        day: day,
+        createdAt: (q && q.createdAt) || Date.now(),
+        endedAt: Date.now(),
+        cursor: 0,
+        blockSize: BLOCK,
+        cursors: {},
+        items: []
+      };
+      return DB.put("queue", ended);
+    }).then(function () {
+      return DB.metaSet("lastEndedDay", day);
     });
   }
 
   function maybeExtend(q) {
     if (q.items.length - q.cursor > TOPUP_AT) return Promise.resolve(q);
     return DB.all("state").then(function (states) {
-      var pools = poolsFor(states || [], q.newToday || []);
+      var pools = poolsFor(states || []);
       q.cursors = q.cursors || {};
       var startBlock = Math.floor(q.items.length / BLOCK);
       var more = emit(pools, startBlock, Math.ceil(BATCH / BLOCK), q.cursors);
@@ -289,6 +303,9 @@ var SCHED = (function () {
       if (result) {
         st.got = (st.got || 0) + 1;
         st.missStreakDays = 0;         /* one good day clears the streak */
+        /* Getting it right clears the miss flag too, so "missed" means she is
+         * still struggling rather than that she stumbled once this morning. */
+        st.lastMissDay = null;
       } else {
         st.missed = (st.missed || 0) + 1;
         /* Count DAYS with a miss, not misses. Ten misses in one sitting is one
@@ -314,7 +331,7 @@ var SCHED = (function () {
   }
 
   return {
-    build: build, maybeExtend: maybeExtend, record: record,
+    build: build, endDay: endDay, maybeExtend: maybeExtend, record: record,
     todaysLog: todaysLog, dayKey: dayKey, today: today, yesterday: yesterday,
     keyOf: keyOf, wordById: wordById, BLOCK: BLOCK
   };

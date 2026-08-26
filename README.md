@@ -11,7 +11,10 @@ long-press and is for the adults.
 - **No text ever reaches her.** Word labels exist only in the parent zone.
 - **No speech recognition.** The app never listens. It only plays.
 - **The session never ends by itself.** No timer, no target, no "well done" screen.
-  You end it, or she walks away. Both are the same thing.
+  You end it from the parent zone, or she walks away.
+- **All 75 words are in play.** Words she missed come back first, then anything she
+  hasn't heard for 4+ days, then everything else, oldest first, cycling for ever.
+  The language changes every 6 words, so all three appear within the first 18 taps.
 - **She is never told she was wrong.** Every tap gets the same celebration, and the two
   scoring buttons look and behave identically from her side.
 - **Nothing is ever sent to a network.** Data leaves only through the iOS share sheet, by
@@ -21,6 +24,13 @@ long-press and is for the adults.
 
 Nothing to set up. Every word ships with a photo and a spoken clip in all three languages,
 committed into this repo as ordinary files. Open it once and it works, offline, forever.
+
+## Ending the day
+
+One button in the parent zone: **End the day**. It clears today's queue, shows the dinner
+card, and tomorrow starts with whatever she got wrong. Nothing to export, nothing to send,
+no network. Progress lives on the phone that made it — there is a manual backup in Settings
+purely against losing a phone.
 
 ## Recording over a word
 
